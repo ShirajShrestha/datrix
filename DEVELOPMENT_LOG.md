@@ -193,3 +193,79 @@ This ensures:
 - No repeated API calls to GNews/RSS (saves API quota)
 - Fast page loads (MongoDB query is quick)
 - Data persists between visits
+
+---
+
+## Recent Updates (2026-02-22) - UI/UX Redesign
+
+### Design System Overhaul
+
+**Typography:**
+- Dual-font system: Inter (sans) for UI elements, Lora (serif) for headlines
+- Playfair Display for display/brand elements
+- Refined type scale for better hierarchy
+
+**Color Palette:**
+- Premium dark mode: #0a0a0c base, #0f0f12 sidebar
+- Light mode: #fcfcfc base, #ffffff sidebar
+- Glassmorphism effects with backdrop-blur
+- Category accent colors (AI=purple, TECH=cyan, ECONOMY=green, WORLD=blue)
+- Brand accent: #6366f1 (indigo)
+
+**Layout:**
+- Fluid grid system (240px sidebar, flexible content, 320px digest panel)
+- Sticky header with centered search bar
+- Responsive breakpoints (mobile bottom nav, collapsible sidebar)
+
+**Components:**
+- Article cards with category-colored left border accent
+- Expandable cards with "Key Points" and "Why It Matters" sections
+- Hover-reveal actions (bookmark, share, read more)
+- Daily Digest panel with bold ordinal numbers
+- Theme toggle (dark/light) with smooth transitions
+
+### Summarization Improvements
+
+**Enhanced Key Points:**
+- Increased from 5 to 8 bullet points per article
+- Improved sentence extraction with better keyword scoring
+- Longer bullet length limit (120 chars vs 100)
+
+**Better "Why It Matters":**
+- Category-specific impact statements (4 options per category)
+- More detailed and context-aware explanations
+- References article title for personalization
+
+### PWA Support Added
+
+**Files Created:**
+- `public/manifest.json` - PWA manifest with app name, colors, icons
+- `public/icon-192.svg` - App icon (192x192)
+- `public/icon-512.svg` - App icon (512x512)
+
+**Configuration:**
+- Updated `next.config.ts` with next-pwa plugin
+- Configured for offline support, auto-install prompt
+- Standalone display mode for mobile
+
+### Bug Fixes
+
+1. **Light mode text readability** - Fixed hardcoded dark colors (text-white, etc.) to use CSS variables
+2. **Main content padding** - Added 32px horizontal padding (16px mobile)
+3. **Header layout** - Fixed sticky header with proper spacing
+4. **Mobile theme toggle** - Removed duplicate, kept only in header
+5. **Pro card removed** - Removed upgrade card from sidebar
+
+---
+
+## Technical Stack (Updated)
+
+- **Framework:** Next.js 16 (App Router)
+- **Styling:** Tailwind CSS with CSS variables
+- **PWA:** next-pwa
+- **Fonts:** Inter, Lora, Playfair Display, DM Sans
+- **Icons:** Lucide React
+- **Themes:** next-themes (dark/light toggle)
+- **Database:** MongoDB (schema ready)
+- **Date Handling:** date-fns
+- **RSS Parsing:** rss-parser

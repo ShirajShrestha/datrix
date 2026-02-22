@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192">
+  <rect width="192" height="192" rx="24" fill="#6366f1"/>
+  <path d="M96 32L120 80L96 72L72 80L96 32Z" fill="white"/>
+  <path d="M72 88L96 136L120 88L96 96L72 88Z" fill="white" opacity="0.8"/>
+  <path d="M56 96L80 144L96 136L80 152L56 104V96Z" fill="white" opacity="0.6"/>
+  <path d="M136 96L112 144L96 136L112 152L136 104V96Z" fill="white" opacity="0.6"/>
+</svg>

@@ -2,6 +2,7 @@
 
 import { Search, SlidersHorizontal, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import { ThemeToggle } from './ThemeToggle';
 
 export type Category = 'all' | 'ai' | 'tech' | 'economy' | 'world';
 export type Importance = 'all' | 'high' | 'medium';
@@ -14,18 +15,18 @@ interface FilterBarProps {
   selectedImportance: Importance;
 }
 
-const categories: { value: Category; label: string; icon: string }[] = [
-  { value: 'all', label: 'All', icon: '📰' },
-  { value: 'ai', label: 'AI', icon: '🤖' },
-  { value: 'tech', label: 'Tech', icon: '💻' },
-  { value: 'economy', label: 'Economy', icon: '📈' },
-  { value: 'world', label: 'World', icon: '🌍' },
+const categories: { value: Category; label: string; color: string }[] = [
+  { value: 'all', label: 'All', color: 'var(--text-muted)' },
+  { value: 'ai', label: 'AI', color: 'var(--accent-ai)' },
+  { value: 'tech', label: 'Tech', color: 'var(--accent-tech)' },
+  { value: 'economy', label: 'Economy', color: 'var(--accent-economy)' },
+  { value: 'world', label: 'World', color: 'var(--accent-world)' },
 ];
 
 const importanceLevels: { value: Importance; label: string; color: string }[] = [
-  { value: 'all', label: 'All', color: 'bg-zinc-700' },
-  { value: 'high', label: 'High', color: 'bg-red-500' },
-  { value: 'medium', label: 'Medium', color: 'bg-orange-500' },
+  { value: 'all', label: 'All', color: 'var(--text-muted)' },
+  { value: 'high', label: 'High', color: 'var(--accent-high)' },
+  { value: 'medium', label: 'Medium', color: 'var(--accent-medium)' },
 ];
 
 export default function FilterBar({
@@ -54,100 +55,182 @@ export default function FilterBar({
   const hasActiveFilters = searchQuery || selectedCategory !== 'all' || selectedImportance !== 'all';
 
   return (
-    <div className="sticky top-0 z-40 bg-zinc-950/80 backdrop-blur-xl border-b border-zinc-800/50">
-      <div className="max-w-7xl mx-auto px-4 py-4">
-        <div className="flex items-center gap-3">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
-            <input
-              type="text"
-              placeholder="Search news..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 bg-zinc-900/80 border border-zinc-800 rounded-lg text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-zinc-700 focus:ring-1 focus:ring-zinc-700 transition-all"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            )}
-          </div>
+    <header 
+      className="sticky top-0 z-50 flex items-center justify-between px-6"
+      style={{ 
+        background: 'var(--bg-base)',
+        borderBottom: '1px solid var(--border)',
+        height: 56,
+      }}
+    >
+      <div style={{ width: 240 }} className="hidden lg:block" />
 
-          <button
-            onClick={() => setShowFilters(!showFilters)}
-            className={`p-2.5 rounded-lg border transition-all ${
-              showFilters 
-                ? 'bg-zinc-800 border-zinc-700 text-zinc-100' 
-                : 'bg-zinc-900/80 border-zinc-800 text-zinc-500 hover:text-zinc-300'
-            }`}
-          >
-            <SlidersHorizontal className="w-4 h-4" />
-          </button>
-
-          {hasActiveFilters && (
+      <div className="flex-1 flex justify-center px-4">
+        <div className="relative w-full max-w-[520px]" style={{ width: 'min(520px, 60%)' }}>
+          <Search 
+            className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4"
+            style={{ color: 'var(--text-muted)' }}
+          />
+          <input
+            type="text"
+            placeholder="Search news..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{
+              width: '100%',
+              height: 38,
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-highlight)',
+              borderRadius: 8,
+              padding: '0 16px 0 40px',
+              fontSize: 14,
+              color: 'var(--text-primary)',
+              outline: 'none',
+              fontFamily: 'var(--font-sans)',
+            }}
+            className="search-input"
+          />
+          {searchQuery && (
             <button
-              onClick={clearFilters}
-              className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2"
+              style={{ color: 'var(--text-muted)' }}
             >
-              Clear
+              <X className="w-4 h-4" />
             </button>
           )}
         </div>
+      </div>
 
-        {showFilters && (
-          <div className="mt-4 pt-4 border-t border-zinc-800/50 animate-in slide-in-from-top-2 duration-200">
-            <div className="flex flex-wrap gap-6">
-              <div>
-                <label className="block text-xs font-medium text-zinc-500 mb-2 uppercase tracking-wider">
-                  Category
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {categories.map((cat) => (
-                    <button
-                      key={cat.value}
-                      onClick={() => onCategoryChange(cat.value)}
-                      className={`px-3 py-1.5 text-sm rounded-lg transition-all ${
-                        selectedCategory === cat.value
-                          ? 'bg-zinc-100 text-zinc-900 font-medium'
-                          : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
-                      }`}
-                    >
-                      {cat.icon} {cat.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
+      <div className="flex items-center gap-2">
+        <ThemeToggle />
+        <button
+          onClick={() => setShowFilters(!showFilters)}
+          style={{
+            width: 36,
+            height: 36,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border-highlight)',
+            borderRadius: 8,
+            color: showFilters ? 'var(--accent-brand)' : 'var(--text-muted)',
+            cursor: 'pointer',
+          }}
+        >
+          <SlidersHorizontal className="w-4 h-4" />
+        </button>
+      </div>
 
-              <div>
-                <label className="block text-xs font-medium text-zinc-500 mb-2 uppercase tracking-wider">
-                  Importance
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {importanceLevels.map((imp) => (
-                    <button
-                      key={imp.value}
-                      onClick={() => onImportanceChange(imp.value)}
-                      className={`px-3 py-1.5 text-sm rounded-lg transition-all flex items-center gap-2 ${
-                        selectedImportance === imp.value
-                          ? 'bg-zinc-100 text-zinc-900 font-medium'
-                          : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
-                      }`}
-                    >
-                      {imp.value !== 'all' && (
-                        <span className={`w-2 h-2 rounded-full ${imp.color}`} />
-                      )}
-                      {imp.label}
-                    </button>
-                  ))}
-                </div>
+      {showFilters && (
+        <div 
+          className="absolute top-full left-0 right-0 px-6 py-4 border-b border-[var(--border)]"
+          style={{ 
+            background: 'var(--bg-base)',
+          }}
+        >
+          <div className="flex flex-wrap gap-6 max-w-5xl mx-auto">
+            <div>
+              <label 
+                className="block text-[10px] font-medium mb-2.5"
+                style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-sans)', textTransform: 'uppercase', letterSpacing: '0.1em' }}
+              >
+                Category
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {categories.map((cat) => (
+                  <button
+                    key={cat.value}
+                    onClick={() => onCategoryChange(cat.value)}
+                    style={{
+                      padding: '6px 12px',
+                      fontSize: 12,
+                      borderRadius: 6,
+                      fontFamily: 'var(--font-sans)',
+                      background: selectedCategory === cat.value ? 'var(--accent-brand)' : 'var(--bg-elevated)',
+                      color: selectedCategory === cat.value ? '#ffffff' : 'var(--text-muted)',
+                      border: selectedCategory === cat.value ? 'none' : '1px solid var(--border)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
               </div>
             </div>
+
+            <div>
+              <label 
+                className="block text-[10px] font-medium mb-2.5"
+                style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-sans)', textTransform: 'uppercase', letterSpacing: '0.1em' }}
+              >
+                Importance
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {importanceLevels.map((imp) => (
+                  <button
+                    key={imp.value}
+                    onClick={() => onImportanceChange(imp.value)}
+                    style={{
+                      padding: '6px 12px',
+                      fontSize: 12,
+                      borderRadius: 6,
+                      fontFamily: 'var(--font-sans)',
+                      background: selectedImportance === imp.value ? 'var(--text-primary)' : 'var(--bg-elevated)',
+                      color: selectedImportance === imp.value ? 'var(--bg-base)' : 'var(--text-muted)',
+                      border: selectedImportance === imp.value ? 'none' : '1px solid var(--border)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    {imp.value !== 'all' && (
+                      <span 
+                        style={{ 
+                          width: 6, 
+                          height: 6, 
+                          borderRadius: '50%', 
+                          backgroundColor: imp.color 
+                        }} 
+                      />
+                    )}
+                    {imp.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {hasActiveFilters && (
+              <button
+                onClick={clearFilters}
+                style={{
+                  alignSelf: 'flex-end',
+                  fontSize: 12,
+                  color: 'var(--text-muted)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontFamily: 'var(--font-sans)',
+                }}
+              >
+                Clear
+              </button>
+            )}
           </div>
-        )}
-      </div>
-    </div>
+        </div>
+      )}
+      <style jsx global>{`
+        .search-input:focus {
+          border-color: var(--accent-brand) !important;
+          box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12) !important;
+          outline: none !important;
+        }
+        .search-input::placeholder {
+          color: var(--text-muted);
+        }
+      `}</style>
+    </header>
   );
 }

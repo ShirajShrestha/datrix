@@ -1,23 +1,38 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Playfair_Display, DM_Sans, Inter, Lora } from "next/font/google";
 import "./globals.css";
 import Sidebar from "@/components/Sidebar";
 import MobileNav from "@/components/MobileNav";
 import MobileHeader from "@/components/MobileHeader";
+import { ThemeProvider } from "@/components/ThemeProvider";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const inter = Inter({
+  variable: "--font-sans",
   subsets: ["latin"],
+  display: "swap",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const lora = Lora({
+  variable: "--font-serif",
   subsets: ["latin"],
+  display: "swap",
+});
+
+const playfair = Playfair_Display({
+  subsets: ["latin"],
+  variable: "--font-display",
+  display: "swap",
+});
+
+const dmSans = DM_Sans({
+  subsets: ["latin"],
+  variable: "--font-dm-sans",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "NewsIntel - AI-Powered News Intelligence",
-  description: "Stay informed with AI-powered news that matters. Aggregates, ranks, and summarizes the most important global news into concise insights.",
+  title: "Datrix - AI-Powered News Intelligence",
+  description: "Stay informed with AI-powered news that matters.",
 };
 
 export default function RootLayout({
@@ -26,16 +41,18 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg-zinc-950 text-zinc-100`}>
-        <div className="flex min-h-screen">
-          <Sidebar />
-          <main className="flex-1 lg:ml-64 pb-20 lg:pb-0">
-            <MobileHeader />
-            {children}
-          </main>
-          <MobileNav />
-        </div>
+    <html lang="en" className={`${inter.variable} ${lora.variable} ${playfair.variable} ${dmSans.variable}`} suppressHydrationWarning>
+      <body className="antialiased bg-[var(--bg-base)] text-[var(--text-primary)]">
+        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
+          <div className="flex min-h-screen">
+            <Sidebar />
+            <main className="flex-1 min-w-0 pb-20 lg:pb-0">
+              <MobileHeader />
+              {children}
+            </main>
+            <MobileNav />
+          </div>
+        </ThemeProvider>
       </body>
     </html>
   );

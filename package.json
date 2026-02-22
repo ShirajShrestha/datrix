@@ -9,11 +9,15 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@fontsource/inter": "^5.2.8",
+    "@fontsource/lora": "^5.2.8",
     "date-fns": "^4.1.0",
     "lucide-react": "^0.575.0",
     "mongodb": "^7.1.0",
     "mongoose": "^9.2.1",
     "next": "16.1.6",
+    "next-pwa": "^5.6.0",
+    "next-themes": "^0.4.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "rss-parser": "^3.13.0"

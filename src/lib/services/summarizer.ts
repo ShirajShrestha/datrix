@@ -64,14 +64,44 @@ function scoreSentence(sentence: string, keywords: Set<string>): number {
   return score;
 }
 
-function generateWhyItMatters(category: string): string {
-  const impacts: Record<string, string> = {
-    ai: 'This development could significantly impact the AI industry and related technologies, potentially affecting how businesses and consumers interact with artificial intelligence.',
-    tech: 'This news could affect technology adoption, product releases, or the competitive landscape in the tech sector.',
-    economy: 'This development may influence market conditions, interest rates, employment, or economic policy decisions.',
-    world: 'This event could have broader implications for international relations, global stability, or policy decisions worldwide.',
+function generateWhyItMatters(article: ScoredArticle): string {
+  const impacts: Record<string, string[]> = {
+    ai: [
+      'This development could significantly impact AI industry growth and adoption rates across multiple sectors.',
+      'May influence regulatory discussions and shape future AI policy frameworks globally.',
+      'Could reshape competitive dynamics among major technology companies and startups.',
+      'Potential to accelerate or hinder specific AI application deployment in enterprise.',
+    ],
+    tech: [
+      'This news could affect technology adoption curves and product release timelines significantly.',
+      'May impact competitive positioning within the technology sector dramatically.',
+      'Could influence investor sentiment and market valuations for related companies.',
+      'Potential implications for supply chains and partner ecosystems worldwide.',
+    ],
+    economy: [
+      'This development may influence market conditions and investor sentiment significantly.',
+      'Could affect monetary policy decisions and interest rate trajectories ahead.',
+      'May have direct implications for employment rates and wage growth patterns.',
+      'Potential impact on inflation trends and consumer purchasing power ahead.',
+    ],
+    world: [
+      'This event could have broader implications for international relations and diplomacy.',
+      'May influence global trade agreements and diplomatic negotiations ongoing.',
+      'Could affect regional stability and security arrangements significantly.',
+      'Potential to shape policy decisions across multiple nations simultaneously.',
+    ],
   };
-  return impacts[category] || 'This story represents a significant development worth monitoring for potential impact on related industries and audiences.';
+  
+  const category = article.category || 'world';
+  const categoryImpacts = impacts[category] || impacts.world;
+  const titleWordCount = article.title.split(' ').length;
+  const baseImpact = categoryImpacts[titleWordCount % categoryImpacts.length];
+  
+  if (article.description && article.description.length > 50) {
+    return `${baseImpact} Specifically relevant to developments in: ${article.title.split(' ').slice(0, 6).join(' ')}...`;
+  }
+  
+  return baseImpact;
 }
 
 export function summarizeArticle(article: ScoredArticle): ArticleSummary {
@@ -91,10 +121,10 @@ export function summarizeArticle(article: ScoredArticle): ArticleSummary {
     tldr: firstSentence.length > 150 
       ? firstSentence.substring(0, 150).replace(/\s+\S*$/, '') + '...'
       : firstSentence || article.title,
-    bullets: importantSentences.slice(0, 5).map(s => 
-      s.length > 100 ? s.substring(0, 100).replace(/\s+\S*$/, '') + '...' : s
+    bullets: importantSentences.slice(0, 8).map(s => 
+      s.length > 120 ? s.substring(0, 120).replace(/\s+\S*$/, '') + '...' : s
     ),
-    whyItMatters: generateWhyItMatters(article.category),
+    whyItMatters: generateWhyItMatters(article),
   };
 }
 

@@ -62,40 +62,68 @@ export default function Home() {
         selectedImportance={selectedImportance}
       />
 
-      <div className="max-w-7xl mx-auto px-4 py-6">
-        <div className="grid lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2">
-            <div className="flex items-center justify-between mb-6">
-              <h1 className="text-2xl font-bold text-zinc-100">
-                {selectedCategory === 'all' ? 'Top Stories' : `${selectedCategory.charAt(0).toUpperCase() + selectedCategory.slice(1)} News`}
-              </h1>
-              <span className="text-sm text-zinc-500">
-                {loading ? 'Loading...' : `${filteredArticles.length} articles`}
-              </span>
+      <div className="flex">
+        <div className="flex-1 min-w-0" style={{ paddingLeft: 32, paddingRight: 32 }}>
+          <style jsx>{`
+            @media (max-width: 768px) {
+              .content-area {
+                padding-left: 16px !important;
+                padding-right: 16px !important;
+              }
+            }
+          `}</style>
+          <div className="content-area">
+            <div className="pt-6 pb-4">
+              <div 
+                className="flex items-center justify-between pb-4 border-b border-[var(--border)]"
+              >
+                <h1 
+                  className="font-serif"
+                  style={{
+                    fontSize: 24,
+                    fontWeight: 700,
+                    letterSpacing: '-0.02em',
+                    color: 'var(--text-primary)',
+                  }}
+                >
+                  {selectedCategory === 'all' ? 'Top Stories' : `${selectedCategory.charAt(0).toUpperCase() + selectedCategory.slice(1)}`}
+                </h1>
+                <div className="flex items-center gap-3">
+                  <span 
+                    style={{ height: 20, width: 1, backgroundColor: 'var(--border)' }} 
+                  />
+                  <span 
+                    className="tabular-nums"
+                    style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}
+                  >
+                    {loading ? '—' : `${filteredArticles.length} articles`}
+                  </span>
+                </div>
+              </div>
             </div>
 
             {loading ? (
               <NewsGridSkeleton count={6} />
             ) : filteredArticles.length > 0 ? (
-              <div className="grid gap-4">
-                {filteredArticles.map((article) => (
-                  <NewsCard key={article._id} article={article} />
+              <div className="flex flex-col">
+                {filteredArticles.map((article, index) => (
+                  <NewsCard key={article._id} article={article} index={index} />
                 ))}
               </div>
             ) : (
               <div className="text-center py-12">
-                <p className="text-zinc-500">No articles found</p>
-                <p className="text-sm text-zinc-600 mt-2">Try adjusting your filters</p>
+                <p style={{ color: 'var(--text-muted)' }}>No articles found</p>
+                <p style={{ fontSize: 14, color: 'var(--text-muted)', opacity: 0.6, marginTop: 8 }}>Try adjusting your filters</p>
               </div>
             )}
           </div>
-
-          <div className="hidden lg:block">
-            <div className="sticky top-24">
-              <DigestPanel articles={articles} />
-            </div>
-          </div>
         </div>
+
+        <aside className="w-[320px] flex-shrink-0 hidden lg:block px-6 pt-6">
+          <div className="sticky top-24">
+            <DigestPanel articles={articles} />
+          </div>
+        </aside>
       </div>
     </div>
   );
