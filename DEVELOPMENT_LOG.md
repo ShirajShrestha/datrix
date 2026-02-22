@@ -155,3 +155,41 @@ curl -H "Authorization: Bearer newsintel_cron_2024" http://localhost:3000/api/cr
 | COHERE_API_KEY | Optional | AI summarization |
 | CRON_SECRET | Yes | For cron job authentication |
 | UPSTASH_REDIS_REST_URL | Optional | Redis caching |
+
+---
+
+## Recent Updates (2026-02-22)
+
+### Data Flow Optimization
+
+**Problem:** Previously, homepage used hardcoded demo data and always fetched fresh data on each request.
+
+**Solution:** Updated `/api/search` to:
+1. **First** check MongoDB for stored articles (from cron job)
+2. **If DB has data** → return stored articles (fast, no API calls)
+3. **If DB empty** → fetch live news as fallback
+
+**API Response now includes:**
+- `source: "database"` - Data from MongoDB (cached by cron)
+- `source: "live"` - Data fetched fresh from APIs
+
+### Files Updated
+- `src/app/api/search/route.ts` - Now fetches from MongoDB first
+
+### Verified Working
+```bash
+# Returns database source after cron has run
+curl http://localhost:3000/api/search
+# {"success":true,"source":"database","count":20,...}
+```
+
+### How It Works Now
+1. **Cron runs** (daily at 6 AM) → fetches news → saves to MongoDB
+2. **User visits homepage** → `/api/search` checks MongoDB → returns stored data
+3. **Multiple visits** → same MongoDB data (no new API calls)
+4. **Only when DB empty** → fetches live data as fallback
+
+This ensures:
+- No repeated API calls to GNews/RSS (saves API quota)
+- Fast page loads (MongoDB query is quick)
+- Data persists between visits
