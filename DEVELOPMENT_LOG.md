@@ -266,6 +266,51 @@ This ensures:
 - **Fonts:** Inter, Lora, Playfair Display, DM Sans
 - **Icons:** Lucide React
 - **Themes:** next-themes (dark/light toggle)
-- **Database:** MongoDB (schema ready)
+- **PWA:** next-pwa
 - **Date Handling:** date-fns
 - **RSS Parsing:** rss-parser
+
+---
+
+## GitHub Actions Cron Setup
+
+### Why GitHub Actions?
+- Vercel cron jobs require Pro plan
+- GitHub Actions runs free on public repos
+- Schedules can run daily without deployment
+
+### Workflow File
+Created `.github/workflows/daily-cron.yml`:
+
+```yaml
+name: Daily News Cron
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # 6:00 AM UTC daily
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  fetch-news:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Vercel News Cron
+        run: |
+          curl -X GET "https://newsintel.vercel.app/api/cron/news" \
+            -H "Authorization: Bearer newsintel_cron_2024"
+
+  fetch-digest:
+    runs-on: ubuntu-latest
+    needs: fetch-news
+    steps:
+      - name: Call Vercel Digest Cron
+        run: |
+          curl -X GET "https://newsintel.vercel.app/api/cron/digest" \
+            -H "Authorization: Bearer newsintel_cron_2024"
+```
+
+### Important Notes
+- GitHub Actions `curl` calls do NOT trigger Vercel deployments
+- Only `git push` triggers deployment
+- CRON_SECRET must match in both Vercel and GitHub Actions
+- URL must be updated to your actual Vercel deployment URL
