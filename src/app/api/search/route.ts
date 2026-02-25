@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
     try {
       await connectToDatabase();
       const dbArticles = await Article.find({})
-        .sort({ importanceScore: -1, publishedAt: -1 })
+        .sort({ publishedAt: -1 })
         .limit(50)
         .lean();
 
@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
           }
         }
 
-    results.sort((a, b) => (b.importanceScore || 0) - (a.importanceScore || 0));
+        results.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
 
         return NextResponse.json({
           success: true,
@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
           articles: results,
         });
       }
-    } catch (dbError) {
+    } catch {
       console.log('Database not available, fetching live news');
     }
 
@@ -113,7 +113,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    results.sort((a, b) => (b.importanceScore || 0) - (a.importanceScore || 0));
+    results.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
 
     return NextResponse.json({
       success: true,

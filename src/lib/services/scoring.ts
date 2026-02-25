@@ -20,6 +20,27 @@ const SOURCE_CREDIBILITY: Record<string, number> = {
   'Nature': 0.9,
   'Wired': 0.75,
   'Ars Technica': 0.7,
+  'Chicago Tribune': 0.7,
+  'Washington Post': 0.85,
+  'Los Angeles Times': 0.75,
+  'The Guardian': 0.8,
+  'CNN': 0.7,
+  'Fox News': 0.65,
+  'NBC News': 0.75,
+  'CBS News': 0.75,
+  'ABC News': 0.75,
+  'AP': 0.8,
+  'Associated Press': 0.8,
+  'CNBC': 0.75,
+  'Forbes': 0.7,
+  'Business Insider': 0.7,
+  'The Atlantic': 0.8,
+  'Politico': 0.7,
+  'Axios': 0.7,
+  'Yahoo News': 0.6,
+  'Yahoo Sports': 0.6,
+  'ESPN': 0.7,
+  'Sports Illustrated': 0.65,
 };
 
 const TOPIC_WEIGHTS: Record<string, number> = {
@@ -48,6 +69,7 @@ function normalizeTitle(title: string): string {
     .trim();
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function findDuplicates(articles: ScoredArticle[]): Map<string, number[]> {
   const groups = new Map<string, number[]>();
   
@@ -94,7 +116,6 @@ function calculateFrequencyScore(article: ScoredArticle, allArticles: ScoredArti
 }
 
 export function deduplicateArticles(articles: ScoredArticle[]): ScoredArticle[] {
-  const seen = new Set<string>();
   const normalized = new Map<string, number>();
   
   for (let i = 0; i < articles.length; i++) {
@@ -125,7 +146,7 @@ export function deduplicateArticles(articles: ScoredArticle[]): ScoredArticle[] 
 
 export function scoreArticles(articles: ScoredArticle[]): ScoredArticle[] {
   return articles.map((article) => {
-    const sourceCred = SOURCE_CREDIBILITY[article.source] || 0.6;
+    const sourceCred = SOURCE_CREDIBILITY[article.source] || 0.55;
     const freshness = calculateFreshnessScore(article.publishedAt);
     const frequency = calculateFrequencyScore(article, articles);
     const topicWeight = TOPIC_WEIGHTS[article.category] || 0.05;

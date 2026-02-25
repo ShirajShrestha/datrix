@@ -1,10 +1,27 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useSyncExternalStore } from 'react';
 import FilterBar, { Category, Importance } from '@/components/FilterBar';
 import NewsCard, { NewsArticle } from '@/components/NewsCard';
 import DigestPanel from '@/components/DigestPanel';
 import { NewsGridSkeleton } from '@/components/Skeletons';
+
+const SAVED_ARTICLES_KEY = 'newsintel_saved_articles';
+const ITEMS_PER_PAGE = 10;
+
+function useLocalStorageStore<T>(key: string, initialValue: T) {
+  const getValue = () => {
+    if (typeof window === 'undefined') return initialValue;
+    const item = localStorage.getItem(key);
+    return item ? JSON.parse(item) : initialValue;
+  };
+
+  return useSyncExternalStore(
+    () => () => {},
+    getValue,
+    () => initialValue
+  );
+}
 
 export default function Home() {
   const [articles, setArticles] = useState<NewsArticle[]>([]);
@@ -13,6 +30,9 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<Category>('all');
   const [selectedImportance, setSelectedImportance] = useState<Importance>('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  
+  const savedArticles = useLocalStorageStore<NewsArticle[]>(SAVED_ARTICLES_KEY, []);
 
   const fetchNews = useCallback(async () => {
     setLoading(true);
@@ -28,6 +48,7 @@ export default function Home() {
       if (data.success) {
         setArticles(data.articles);
         setFilteredArticles(data.articles);
+        setCurrentPage(1);
       }
     } catch (error) {
       console.error('Error fetching news:', error);
@@ -51,6 +72,38 @@ export default function Home() {
   const handleImportanceChange = useCallback((importance: Importance) => {
     setSelectedImportance(importance);
   }, []);
+
+  const handleSave = useCallback((article: NewsArticle) => {
+    const saved = localStorage.getItem(SAVED_ARTICLES_KEY);
+    let currentSaved: NewsArticle[] = [];
+    
+    if (saved) {
+      try {
+        currentSaved = JSON.parse(saved);
+      } catch (e) {
+        console.error('Error parsing saved articles:', e);
+      }
+    }
+
+    const exists = currentSaved.find(a => a._id === article._id);
+    if (exists) {
+      currentSaved = currentSaved.filter(a => a._id !== article._id);
+    } else {
+      currentSaved.push({ ...article, isSaved: true });
+    }
+
+    localStorage.setItem(SAVED_ARTICLES_KEY, JSON.stringify(currentSaved));
+  }, []);
+
+  const isArticleSaved = useCallback((articleId: string) => {
+    return savedArticles.some((a: NewsArticle) => a._id === articleId);
+  }, [savedArticles]);
+
+  const paginatedArticles = filteredArticles.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE
+  );
+  const totalPages = Math.ceil(filteredArticles.length / ITEMS_PER_PAGE);
 
   return (
     <div className="min-h-screen">
@@ -104,12 +157,42 @@ export default function Home() {
 
             {loading ? (
               <NewsGridSkeleton count={6} />
-            ) : filteredArticles.length > 0 ? (
-              <div className="flex flex-col">
-                {filteredArticles.map((article, index) => (
-                  <NewsCard key={article._id} article={article} index={index} />
-                ))}
-              </div>
+            ) : paginatedArticles.length > 0 ? (
+              <>
+                <div className="flex flex-col">
+                  {paginatedArticles.map((article) => (
+                    <NewsCard 
+                      key={article._id} 
+                      article={{ ...article, isSaved: isArticleSaved(article._id) }} 
+                      onSave={handleSave}
+                    />
+                  ))}
+                </div>
+                
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-center gap-2 py-8">
+                    <button
+                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                      disabled={currentPage === 1}
+                      className="px-4 py-2 rounded-md text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[var(--bg-elevated)] transition-colors"
+                      style={{ color: 'var(--text-secondary)', backgroundColor: 'var(--bg-surface)' }}
+                    >
+                      Previous
+                    </button>
+                    <span style={{ color: 'var(--text-muted)', fontSize: 14 }}>
+                      Page {currentPage} of {totalPages}
+                    </span>
+                    <button
+                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                      disabled={currentPage === totalPages}
+                      className="px-4 py-2 rounded-md text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[var(--bg-elevated)] transition-colors"
+                      style={{ color: 'var(--text-secondary)', backgroundColor: 'var(--bg-surface)' }}
+                    >
+                      Next
+                    </button>
+                  </div>
+                )}
+              </>
             ) : (
               <div className="text-center py-12">
                 <p style={{ color: 'var(--text-muted)' }}>No articles found</p>

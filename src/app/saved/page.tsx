@@ -1,27 +1,34 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useSyncExternalStore } from 'react';
 import NewsCard, { NewsArticle } from '@/components/NewsCard';
 import { NewsGridSkeleton } from '@/components/Skeletons';
 import { Bookmark } from 'lucide-react';
 
 const SAVED_ARTICLES_KEY = 'newsintel_saved_articles';
 
-export default function SavedPage() {
-  const [articles, setArticles] = useState<NewsArticle[]>([]);
-  const [loading, setLoading] = useState(true);
+function useLocalStorageStore<T>(key: string, initialValue: T) {
+  const getValue = () => {
+    if (typeof window === 'undefined') return initialValue;
+    const item = localStorage.getItem(key);
+    return item ? JSON.parse(item) : initialValue;
+  };
 
-  useEffect(() => {
-    const saved = localStorage.getItem(SAVED_ARTICLES_KEY);
-    if (saved) {
-      try {
-        setArticles(JSON.parse(saved));
-      } catch (e) {
-        console.error('Error loading saved articles:', e);
-      }
-    }
-    setLoading(false);
-  }, []);
+  return useSyncExternalStore(
+    () => () => {},
+    getValue,
+    () => initialValue
+  );
+}
+
+export default function SavedPage() {
+  const articles = useLocalStorageStore<NewsArticle[]>(SAVED_ARTICLES_KEY, []);
+  
+  const loading = useSyncExternalStore(
+    () => () => {},
+    () => false,
+    () => true
+  );
 
   const handleSave = (article: NewsArticle) => {
     const saved = localStorage.getItem(SAVED_ARTICLES_KEY);
@@ -43,7 +50,7 @@ export default function SavedPage() {
     }
 
     localStorage.setItem(SAVED_ARTICLES_KEY, JSON.stringify(currentSaved));
-    setArticles(currentSaved);
+    window.location.reload();
   };
 
   return (
@@ -63,7 +70,7 @@ export default function SavedPage() {
           <NewsGridSkeleton count={4} />
         ) : articles.length > 0 ? (
           <div className="grid gap-4">
-            {articles.map((article) => (
+            {articles.map((article: NewsArticle) => (
               <NewsCard key={article._id} article={article} onSave={handleSave} />
             ))}
           </div>

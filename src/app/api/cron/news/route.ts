@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
           });
           return { ...article, summary, action: 'updated' };
         } else {
-          const newArticle = await Article.create({
+          await Article.create({
             title: article.title,
             url: article.url,
             source: article.source,

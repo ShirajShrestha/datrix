@@ -102,6 +102,29 @@ interface GNewsResponse {
   articles: GNewsArticle[];
 }
 
+interface MediaStackArticle {
+  author: string | null;
+  title: string;
+  description: string;
+  url: string;
+  source: string;
+  image: string | null;
+  category: string;
+  language: string;
+  country: string;
+  published_at: string;
+}
+
+interface MediaStackResponse {
+  pagination: {
+    limit: number;
+    offset: number;
+    count: number;
+    total: number;
+  };
+  data: MediaStackArticle[];
+}
+
 async function fetchFromGNews(): Promise<RawArticle[]> {
   const apiKey = process.env.GNEWS_API_KEY;
   if (!apiKey || apiKey === 'demo_key') {
@@ -150,6 +173,68 @@ async function fetchFromGNews(): Promise<RawArticle[]> {
   return allArticles;
 }
 
+async function fetchFromMediaStack(): Promise<RawArticle[]> {
+  const apiKey = process.env.MEDIASTACK_API_KEY;
+  if (!apiKey) {
+    console.log('MediaStack API key not configured');
+    return [];
+  }
+
+  const categories = ['technology', 'business', 'science', 'general'];
+  const allArticles: RawArticle[] = [];
+
+  const categoryMap: Record<string, string> = {
+    technology: 'tech',
+    business: 'economy',
+    science: 'world',
+    general: 'world',
+  };
+
+  const stockTickerPattern = /\b(OTCMKTS|NYSE|TSE|AMEX|NASDAQ)\b/i;
+  const lowQualityPattern = /\b( Sets New \d+-Year High| Reaches New \d+-Week High| Hits New \d+-Year High| Sets New \d+-Month High| Time to Buy| What's Next| Here's What Happened)\b/i;
+  const earningsPattern = /\b(Q[1-4]\s*\d{4}\s*Earnings Call Transcript|Q[1-4]\s*\d{4}\s*Earnings Call Transcript)\b/i;
+
+  for (const category of categories) {
+    try {
+      const response = await fetch(
+        `http://api.mediastack.com/v1/news?access_key=${apiKey}&categories=${category}&countries=us,gb&limit=20&sort=published_desc`
+      );
+
+      if (!response.ok) {
+        console.error(`MediaStack API error for ${category}:`, response.status);
+        continue;
+      }
+
+      const data: MediaStackResponse = await response.json();
+
+      for (const article of data.data) {
+        if (!article.title || !article.url) continue;
+        
+        if (stockTickerPattern.test(article.title) && lowQualityPattern.test(article.title)) {
+          continue;
+        }
+        
+        if (earningsPattern.test(article.title)) {
+          continue;
+        }
+
+        allArticles.push({
+          title: article.title,
+          description: article.description || '',
+          url: article.url,
+          source: article.source,
+          category: categoryMap[category] || 'world',
+          publishedAt: new Date(article.published_at),
+        });
+      }
+    } catch (error) {
+      console.error(`Error fetching MediaStack for ${category}:`, error);
+    }
+  }
+
+  return allArticles;
+}
+
 export async function fetchFromRSS(): Promise<RawArticle[]> {
   const articles: RawArticle[] = [];
 
@@ -181,18 +266,22 @@ export async function fetchDemoArticles(): Promise<RawArticle[]> {
 }
 
 export async function fetchAllNews(): Promise<RawArticle[]> {
-  const [gnewsArticles, rssArticles, demoArticles] = await Promise.all([
+  const [mediastackArticles, gnewsArticles, rssArticles, demoArticles] = await Promise.all([
+    fetchFromMediaStack().catch(() => []),
     fetchFromGNews().catch(() => []),
     fetchFromRSS().catch(() => []),
     fetchDemoArticles(),
   ]);
 
-  // Use GNews if available, otherwise fall back to demo
-  const combined = gnewsArticles.length > 0 
-    ? [...gnewsArticles, ...demoArticles.slice(0, 3)]
-    : [...demoArticles, ...rssArticles];
+  // Combine all sources - prioritize fresh news from multiple channels
+  const allArticles = [
+    ...mediastackArticles,
+    ...gnewsArticles,
+    ...rssArticles,
+    ...demoArticles,
+  ];
 
-  return combined;
+  return allArticles;
 }
 
 export function categorizeArticle(title: string, description: string): string {
