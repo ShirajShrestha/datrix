@@ -314,3 +314,72 @@ jobs:
 - Only `git push` triggers deployment
 - CRON_SECRET must match in both Vercel and GitHub Actions
 - URL must be updated to your actual Vercel deployment URL
+
+---
+
+## Recent Updates (2026-02-25)
+
+### News Source Issues Fixed
+
+**Problem:** GNews API was returning 404 errors (API endpoint changed) and the app wasn't fetching new news.
+
+**Solution:**
+1. **Implemented MediaStack API** - Added `fetchFromMediaStack()` function in `src/lib/services/newsFetcher.ts`
+2. **Combined all sources** - Now fetches from MediaStack, GNews, RSS, and demo articles simultaneously
+3. **Added stock spam filter** - Filters out low-quality stock ticker articles (earnings calls, "XYZ hits 52-week high")
+4. **Extended source credibility** - Added more news sources to scoring system
+
+### Files Updated
+- `src/lib/services/newsFetcher.ts` - MediaStack integration + combined sources
+- `src/lib/services/scoring.ts` - Extended SOURCE_CREDIBILITY map
+
+---
+
+## Recent Updates (2026-02-25) - UI/UX Improvements
+
+### 1. Bookmark Functionality Fixed
+
+**Problem:** Bookmark button wasn't working - articles weren't being saved.
+
+**Solution:**
+- Added `onSave` handler to home page
+- Implemented `useSyncExternalStore` for proper localStorage sync
+- Bookmark now saves/unsaves articles correctly
+
+**Files Updated:**
+- `src/app/page.tsx` - Added bookmark save functionality
+
+### 2. Enhanced Summaries
+
+**Problem:** Key points and "Why It Matters" were too short and incomplete.
+
+**Solution:**
+- TL;DR: Extended to 200+ characters with keyword context
+- Key Points: Now generates up to 10 bullets (was 8), each up to 200 chars
+- Why It Matters: Now 2-3 detailed sentences per category
+- Added fallback content generation when source descriptions are short
+
+**Files Updated:**
+- `src/lib/services/summarizer.ts` - Enhanced summarization logic
+
+### 3. Pagination & Newest First
+
+**Problem:** No pagination and old news was showing first.
+
+**Solution:**
+- Added 10 items per page pagination
+- Changed API to sort by `publishedAt` descending (newest first)
+- Added Previous/Next buttons with page counter
+- Newest news now appears at the top (stack format)
+
+**Files Updated:**
+- `src/app/page.tsx` - Added pagination component
+- `src/app/api/search/route.ts` - Changed sort order
+
+---
+
+## Bug Fixes
+
+1. **Lint errors** - Fixed various lint warnings across codebase
+2. **Saved page hydration** - Fixed setState in effect warnings
+3. **NewsCard cleanup** - Removed unused variables
