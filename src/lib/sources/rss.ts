@@ -15,30 +15,46 @@ export interface RssItem {
   enclosure?: { url?: string; type?: string };
   'media:thumbnail'?: MediaNode | MediaNode[];
   'media:content'?: MediaNode | MediaNode[];
+  'content:encoded'?: string;
   'media:group'?: Record<string, MediaNode | MediaNode[] | undefined>;
 }
 
 const FEED_TIMEOUT_MS = 8000;
 
 const parser = new Parser<Record<string, never>, RssItem>({
-  timeout: FEED_TIMEOUT_MS,
-  headers: { 'User-Agent': 'Datrix/2.0 (+news aggregator)' },
   customFields: {
-    item: ['media:thumbnail', 'media:content', 'media:group'] as never,
+    item: ['media:thumbnail', 'media:content', 'media:group', 'content:encoded'] as never,
   },
 });
 
+const NAMED: Record<string, string> = {
+  lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', mdash: '\u2014', ndash: '\u2013',
+  hellip: '\u2026', rsquo: '\u2019', lsquo: '\u2018', rdquo: '\u201D', ldquo: '\u201C',
+};
+
+function fromCode(n: number, orig: string): string {
+  if (!Number.isInteger(n) || n < 0 || n > 0x10ffff || (n >= 0xd800 && n <= 0xdfff)) return orig;
+  return String.fromCodePoint(n);
+}
+
 function stripHtml(s: string): string {
-  return s
+  const text = s
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, ' ')
     .replace(/<[^>]*>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#0?39;|&apos;/g, "'")
-    .replace(/\s+/g, ' ')
-    .trim();
+    .replace(/&#x([0-9a-f]+);/gi, (m, h) => fromCode(parseInt(h, 16), m))
+    .replace(/&#(\d+);/g, (m, d) => fromCode(parseInt(d, 10), m))
+    .replace(/&(lt|gt|quot|apos|nbsp|mdash|ndash|hellip|rsquo|lsquo|rdquo|ldquo);/g, (_, n) => NAMED[n])
+    .replace(/&amp;/g, '&');
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function truncate(s: string, max: number): string {
+  if (s.length <= max) return s;
+  let end = max;
+  const c = s.charCodeAt(end - 1);
+  if (c >= 0xd800 && c <= 0xdbff) end--;
+  return s.slice(0, end);
 }
 
 function nodes(n: MediaNode | MediaNode[] | undefined): MediaNode[] {
@@ -76,6 +92,21 @@ function extractImage(item: RssItem): string | undefined {
   if (enc && isHttp(enc.url) && ((enc.type ?? '').startsWith('image/') || /\.(jpe?g|png|webp|gif)(\?|$)/i.test(enc.url))) {
     return enc.url;
   }
+  return extractHtmlImage(item);
+}
+
+function extractHtmlImage(item: RssItem): string | undefined {
+  for (const html of [item.content, item['content:encoded'], item.description]) {
+    if (!html) continue;
+    for (const m of html.matchAll(/<img\b[^>]*>/gi)) {
+      const tag = m[0];
+      const src = /\b(?:data-src|src)\s*=\s*["']([^"']+)["']/i.exec(tag)?.[1]?.replace(/&amp;/g, '&');
+      if (!isHttp(src)) continue;
+      if (/\b(?:width|height)\s*=\s*["']?1["']?(?=[\s/>"'])/i.test(tag)) continue;
+      if (/pixel|tracking|beacon/i.test(src)) continue;
+      return src;
+    }
+  }
   return undefined;
 }
 
@@ -88,7 +119,7 @@ export function parseRssItem(item: RssItem, feed: FeedDef, category: CategorySlu
   if (Number.isNaN(publishedAt.getTime())) return null;
 
   const rawDesc = item.contentSnippet ?? item.description ?? item.content;
-  const description = rawDesc ? stripHtml(rawDesc).slice(0, 600) : undefined;
+  const description = rawDesc ? truncate(stripHtml(rawDesc), 600) : undefined;
 
   return {
     title: stripHtml(title),
@@ -101,22 +132,41 @@ export function parseRssItem(item: RssItem, feed: FeedDef, category: CategorySlu
   };
 }
 
+async function fetchFeed(feed: FeedDef, category: CategorySlug): Promise<RawArticle[]> {
+  try {
+    const res = await fetch(feed.url, {
+      signal: AbortSignal.timeout(FEED_TIMEOUT_MS),
+      headers: {
+        'User-Agent': 'Datrix/1.0 (+news reader)',
+        Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml',
+      },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const parsed = await parser.parseString(await res.text());
+    return parsed.items
+      .map((it) => parseRssItem(it, feed, category))
+      .filter((a): a is RawArticle => a !== null);
+  } catch (err) {
+    console.warn(`[rss] feed failed: ${feed.url} (${err instanceof Error ? err.message : 'error'})`);
+    return [];
+  }
+}
+
+const MAX_CONCURRENCY = 8;
+
 export async function fetchRss(): Promise<RawArticle[]> {
   const jobs: Array<{ feed: FeedDef; category: CategorySlug }> = [];
   for (const cat of CATEGORIES) for (const feed of cat.feeds) jobs.push({ feed, category: cat.slug });
 
-  const results = await Promise.all(
-    jobs.map(async ({ feed, category }): Promise<RawArticle[]> => {
-      try {
-        const parsed = await parser.parseURL(feed.url);
-        return parsed.items
-          .map((it) => parseRssItem(it, feed, category))
-          .filter((a): a is RawArticle => a !== null);
-      } catch (err) {
-        console.warn(`[rss] feed failed: ${feed.url} (${err instanceof Error ? err.message : 'error'})`);
-        return [];
-      }
-    }),
-  );
+  // Duplicates across category feeds are intentionally returned; scoring.deduplicateArticles merges them.
+  const results: RawArticle[][] = new Array(jobs.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < jobs.length) {
+      const i = next++;
+      results[i] = await fetchFeed(jobs[i].feed, jobs[i].category);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENCY, jobs.length) }, worker));
   return results.flat();
 }

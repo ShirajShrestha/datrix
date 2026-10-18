@@ -38,4 +38,33 @@ describe('parseRssItem', () => {
     const a = parseRssItem({ ...base, contentSnippet: undefined, description: '<p>Some <b>bold</b> &amp; text</p>' }, feed, 'world');
     expect(a?.description).toBe('Some bold & text');
   });
+
+  it('rejects non-http image URLs', () => {
+    for (const u of ['data:image/png;base64,AAA', 'javascript:alert(1)']) {
+      expect(parseRssItem({ ...base, 'media:thumbnail': { $: { url: u } } }, feed, 'world')?.imageUrl).toBeUndefined();
+      expect(parseRssItem({ ...base, 'media:content': { $: { url: u, medium: 'image' } } }, feed, 'world')?.imageUrl).toBeUndefined();
+      expect(parseRssItem({ ...base, enclosure: { url: u, type: 'image/png' } }, feed, 'world')?.imageUrl).toBeUndefined();
+    }
+  });
+  it('upgrades BBC width on media:content', () => {
+    const a = parseRssItem({ ...base, 'media:content': { $: { url: 'https://ichef.bbci.co.uk/news/240/cpsprodpb/a/x.jpg', medium: 'image' } } }, feed, 'world');
+    expect(a?.imageUrl).toBe('https://ichef.bbci.co.uk/news/800/cpsprodpb/a/x.jpg');
+  });
+  it('decodes entities', () => {
+    const a = parseRssItem({ ...base, description: 'It&#8217;s &#x2019; &mdash; &amp;lt; ok' }, feed, 'world');
+    expect(a?.description).toBe('It\u2019s \u2019 \u2014 &lt; ok');
+  });
+  it('removes script and style content', () => {
+    const a = parseRssItem({ ...base, description: 'A<script>evil()</script><style>.x{}</style><!-- c -->B' }, feed, 'world');
+    expect(a?.description).toBe('A B');
+  });
+  it('falls back to in-HTML img', () => {
+    const a = parseRssItem({ ...base, description: '<p><img src="https://img.example.com/h.jpg"></p>' }, feed, 'world');
+    expect(a?.imageUrl).toBe('https://img.example.com/h.jpg');
+  });
+  it('skips tracking pixel and picks first real img', () => {
+    const html = '<img src="https://t.example.com/a.gif" width="1" height="1"><img src="https://x.com/pixel.gif"><img data-src="https://img.example.com/real.jpg">';
+    expect(parseRssItem({ ...base, 'content:encoded': html }, feed, 'world')?.imageUrl).toBe('https://img.example.com/real.jpg');
+    expect(parseRssItem({ ...base, description: '<img src="https://t.example.com/a.gif" width="1" height="1">' }, feed, 'world')?.imageUrl).toBeUndefined();
+  });
 });
