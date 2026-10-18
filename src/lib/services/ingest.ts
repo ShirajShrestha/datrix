@@ -7,6 +7,71 @@ import { Article } from '@/lib/models/Article';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const POOL_PER_CATEGORY = 25;
+export const INGEST_BUDGET_MS = 50_000;
+const IMAGE_MIN_REMAINING_MS = 12_000;
+const WRITE_RESERVE_MS = 8_000;
+
+export function planImageBudget(
+  elapsedMs: number,
+  budgetMs: number = INGEST_BUDGET_MS,
+): { run: boolean; max: number; raceMs: number } {
+  const remaining = budgetMs - elapsedMs;
+  if (remaining < IMAGE_MIN_REMAINING_MS) return { run: false, max: 0, raceMs: 0 };
+  return { run: true, max: Math.min(60, Math.floor(remaining / 1000)), raceMs: remaining - WRITE_RESERVE_MS };
+}
+
+/** Merge items sharing a url: keep highest importanceScore, union categories/sources, first non-empty imageUrl. */
+export function mergeByUrl<T extends ScoredArticle>(items: T[]): T[] {
+  const map = new Map<string, T>();
+  for (const it of items) {
+    const cur = map.get(it.url);
+    if (!cur) {
+      map.set(it.url, { ...it, categories: [...it.categories], sources: [...it.sources] });
+      continue;
+    }
+    const best = (it.importanceScore ?? 0) > (cur.importanceScore ?? 0) ? it : cur;
+    const other = best === it ? cur : it;
+    const sources = [...best.sources];
+    for (const r of other.sources) if (!sources.some((x) => x.name === r.name && x.url === r.url)) sources.push(r);
+    map.set(it.url, {
+      ...best,
+      categories: [...new Set([...best.categories, ...other.categories])],
+      sources,
+      imageUrl: best.imageUrl || other.imageUrl,
+    });
+  }
+  return [...map.values()];
+}
+
+export function buildOps(
+  valid: ScoredArticle[],
+  summaries: Map<string, StoredSummary>,
+  existingSummaryUrls: Set<string>,
+  now: Date,
+) {
+  return valid.map((a) => {
+    const publishedAt = new Date(a.publishedAt);
+    const $set: Record<string, unknown> = {
+      importanceScore: a.importanceScore ?? 0,
+      categories: a.categories,
+      sources: a.sources,
+      publishedAt,
+      expireAt: computeExpireAt(publishedAt, now),
+    };
+    if (a.imageUrl) $set.imageUrl = a.imageUrl;
+    const summary = summaries.get(a.url);
+    // Never overwrite a stored summary.
+    if (summary && !existingSummaryUrls.has(a.url)) $set.summary = summary;
+    return {
+      updateOne: {
+        filter: { url: a.url },
+        update: { $set, $setOnInsert: { title: a.title, source: a.source, topics: [] as string[] } },
+        upsert: true,
+        setDefaultsOnInsert: false, // expireAt is set explicitly above
+      },
+    };
+  });
+}
 
 export interface IngestReport {
   fetched: number;
@@ -20,7 +85,9 @@ export interface IngestReport {
 
 export interface StoredSummary { tldr: string; bullets: string[]; whyItMatters?: string }
 
+/** Throws RangeError on an invalid publishedAt (callers validate documents first). */
 export function computeExpireAt(publishedAt: Date, now: Date = new Date()): Date {
+  if (Number.isNaN(publishedAt.getTime())) throw new RangeError('invalid publishedAt');
   return new Date(Math.max(publishedAt.getTime() + 30 * DAY_MS, now.getTime() + DAY_MS));
 }
 
@@ -83,7 +150,9 @@ function cleanCategories(cats: string[]): CategorySlug[] {
   return out;
 }
 
-export async function runIngest(): Promise<IngestReport> {
+export async function runIngest(opts: { clock?: () => number } = {}): Promise<IngestReport> {
+  const clock = opts.clock ?? Date.now;
+  const startedAt = clock();
   const now = new Date();
   await connectToDatabase();
 
@@ -106,10 +175,19 @@ export async function runIngest(): Promise<IngestReport> {
   const pool = selectPool(deduped, POOL_PER_CATEGORY);
   report.kept = pool.length;
 
-  const withImages = await resolveImages(pool);
+  const plan = planImageBudget(clock() - startedAt);
+  let withImages = pool;
+  if (plan.run) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<null>((res) => { timer = setTimeout(() => res(null), plan.raceMs); });
+    const res = await Promise.race([resolveImages(pool, { max: plan.max }), timeout]);
+    if (timer) clearTimeout(timer);
+    if (res) withImages = res;
+    else failures.push('images:timeout');
+  }
 
   // Normalize categories and validate before touching the DB.
-  const valid: ScoredArticle[] = [];
+  const validated: ScoredArticle[] = [];
   for (const a of withImages) {
     const categories = cleanCategories(a.categories);
     if (categories.length === 0) continue;
@@ -128,46 +206,37 @@ export async function runIngest(): Promise<IngestReport> {
       failures.push(`invalid:${hostOf(a.url)}`);
       continue;
     }
-    valid.push(candidate);
+    validated.push(candidate);
   }
+  const valid = mergeByUrl(validated);
   if (valid.length === 0) return report;
 
   const existing: { url: string; summary?: { tldr?: string } }[] = await Article.find(
     { url: { $in: valid.map((a) => a.url) } },
     { url: 1, summary: 1 },
   ).lean();
-  const existingUrls = new Set(existing.map((e) => e.url));
   const hasSummary = new Set(existing.filter((e) => e.summary?.tldr).map((e) => e.url));
 
   const needSummary = valid.filter((a) => !hasSummary.has(a.url));
   const { summaries, llmCalls } = await summarizeNew(needSummary);
   report.llmCalls = llmCalls;
+  // summarized = newly summarized docs this run (includes the extractive placeholder until Task 10).
   report.summarized = summaries.size;
 
-  const ops = valid.map((a) => {
-    const publishedAt = new Date(a.publishedAt);
-    const $set: Record<string, unknown> = {
-      importanceScore: a.importanceScore ?? 0,
-      categories: a.categories,
-      sources: a.sources,
-      publishedAt,
-      expireAt: computeExpireAt(publishedAt, now),
-    };
-    if (a.imageUrl) $set.imageUrl = a.imageUrl;
-    const summary = summaries.get(a.url);
-    if (summary) $set.summary = summary;
-    return {
-      updateOne: {
-        filter: { url: a.url },
-        update: { $set, $setOnInsert: { title: a.title, source: a.source, topics: [] as string[] } },
-        upsert: true,
-        setDefaultsOnInsert: false, // expireAt is set explicitly above
-      },
-    };
-  });
-
-  await Article.bulkWrite(ops, { ordered: false, throwOnValidationError: true });
-  report.updated = valid.filter((a) => existingUrls.has(a.url)).length;
-  report.created = valid.length - report.updated;
+  const ops = buildOps(valid, summaries, hasSummary, now);
+  try {
+    const r = await Article.bulkWrite(ops, { ordered: false, throwOnValidationError: true });
+    report.created = r.upsertedCount ?? 0;
+    // matchedCount = existing docs touched (modifiedCount would hide unchanged ones).
+    report.updated = r.matchedCount ?? 0;
+  } catch (e) {
+    const err = e as { name?: string; result?: Record<string, number>; writeErrors?: unknown[] };
+    if (/MongoNetworkError|MongoServerSelectionError|MongoNotConnected/.test(err?.name ?? '')) throw e;
+    const res = err?.result ?? {};
+    report.created = res.upsertedCount ?? 0;
+    report.updated = res.matchedCount ?? 0;
+    const n = Array.isArray(err?.writeErrors) ? err.writeErrors.length : undefined;
+    failures.push(n !== undefined ? `write-error:${n}` : 'write-error');
+  }
   return report;
 }

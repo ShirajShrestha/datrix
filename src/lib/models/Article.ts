@@ -41,7 +41,8 @@ const ArticleSchema = new Schema<IArticle>(
     sources: [{ _id: false, name: { type: String, required: true }, url: { type: String, required: true } }],
     publishedAt: { type: Date, required: true },
     // TTL field. Default only applies to new Article() docs; bulk upserts (bulkWrite/updateOne
-    // with upsert) bypass schema defaults, so Task 9 must set expireAt explicitly on every upsert.
+    // with upsert) bypass schema defaults, so ingest sets expireAt explicitly on every upsert, with `setDefaultsOnInsert:false` on the ops and
+    // bulkWrite `throwOnValidationError:true` (otherwise Mongoose silently drops ops that fail casting).
     expireAt: {
       type: Date,
       default(this: { publishedAt?: Date } | null) {
