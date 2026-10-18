@@ -13,9 +13,12 @@ export interface NewsArticle {
   url: string;
   source: string;
   category: string;
+  categories?: string[];
+  imageUrl?: string;
+  sources?: { name: string; url: string }[];
   publishedAt: Date;
   importanceScore: number;
-  topics: string[];
+  topics?: string[];
   summary?: {
     tldr: string;
     bullets: string[];
@@ -35,6 +38,9 @@ const categoryColors: Record<string, { border: string; text: string; bg: string;
   economy: { border: 'var(--accent-economy)', text: 'var(--accent-economy)', bg: 'rgba(5, 150, 105, 0.08)', dot: 'var(--accent-economy)', tint: 'rgba(5, 150, 105, 0.08)' },
   world: { border: 'var(--accent-world)', text: 'var(--accent-world)', bg: 'rgba(37, 99, 235, 0.08)', dot: 'var(--accent-world)', tint: 'rgba(37, 99, 235, 0.08)' },
 };
+
+categoryColors.technology = categoryColors.tech;
+categoryColors.business = categoryColors.economy;
 
 const defaultCategory = { border: 'var(--border-highlight)', text: 'var(--text-muted)', bg: 'transparent', dot: 'var(--text-muted)', tint: 'transparent' };
 

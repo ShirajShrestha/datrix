@@ -15,7 +15,7 @@ export default function CategoryPage() {
   const fetchNews = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/search?category=${category}`);
+      const response = await fetch(`/api/articles?categories=${category}`);
       const data = await response.json();
       
       if (data.success) {

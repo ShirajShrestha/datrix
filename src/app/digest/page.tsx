@@ -13,7 +13,7 @@ export default function DigestPage() {
     const fetchNews = async () => {
       setLoading(true);
       try {
-        const response = await fetch('/api/search');
+        const response = await fetch('/api/articles?limit=50');
         const data = await response.json();
         
         if (data.success) {

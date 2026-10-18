@@ -39,10 +39,10 @@ export default function Home() {
     try {
       const params = new URLSearchParams();
       if (searchQuery) params.set('q', searchQuery);
-      if (selectedCategory !== 'all') params.set('category', selectedCategory);
+      if (selectedCategory !== 'all') params.set('categories', selectedCategory);
       if (selectedImportance !== 'all') params.set('importance', selectedImportance);
 
-      const response = await fetch(`/api/search?${params.toString()}`);
+      const response = await fetch(`/api/articles?${params.toString()}`);
       const data = await response.json();
       
       if (data.success) {
