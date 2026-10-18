@@ -138,10 +138,10 @@
 ### Testing Cron Jobs Locally
 ```bash
 # Test news fetch
-curl -H "Authorization: Bearer newsintel_cron_2024" http://localhost:3000/api/cron/news
+curl -H "Authorization: Bearer ${CRON_SECRET}" http://localhost:3000/api/cron/news
 
 # Test digest generation
-curl -H "Authorization: Bearer newsintel_cron_2024" http://localhost:3000/api/cron/digest
+curl -H "Authorization: Bearer ${CRON_SECRET}" http://localhost:3000/api/cron/digest
 ```
 
 ---
@@ -297,7 +297,7 @@ jobs:
       - name: Call Vercel News Cron
         run: |
           curl -X GET "https://newsintel.vercel.app/api/cron/news" \
-            -H "Authorization: Bearer newsintel_cron_2024"
+            -H "Authorization: Bearer ${CRON_SECRET}"
 
   fetch-digest:
     runs-on: ubuntu-latest
@@ -306,7 +306,7 @@ jobs:
       - name: Call Vercel Digest Cron
         run: |
           curl -X GET "https://newsintel.vercel.app/api/cron/digest" \
-            -H "Authorization: Bearer newsintel_cron_2024"
+            -H "Authorization: Bearer ${CRON_SECRET}"
 ```
 
 ### Important Notes
