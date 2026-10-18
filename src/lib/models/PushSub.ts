@@ -12,6 +12,8 @@ export interface IPushSub extends Document {
   timeZone: string;
   lastSentDate?: string;
   lastTestAt?: Date;
+  failCount?: number;
+  lastFailDate?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -47,6 +49,8 @@ const PushSubSchema = new Schema<IPushSub>(
     },
     lastSentDate: { type: String, match: [/^\d{4}-\d{2}-\d{2}$/, 'lastSentDate must be YYYY-MM-DD'] },
     lastTestAt: { type: Date },
+    failCount: { type: Number, default: 0 },
+    lastFailDate: { type: String },
   },
   { timestamps: true },
 );

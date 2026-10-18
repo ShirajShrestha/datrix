@@ -39,3 +39,16 @@ describe('runWithConcurrency', () => {
     expect((await runWithConcurrency([], 5, async () => {})).deferred).toEqual([]);
   });
 });
+
+describe('runWithConcurrency robustness', () => {
+  it('a throwing task does not reject; others complete', async () => {
+    const done: number[] = [];
+    const r = await runWithConcurrency([1, 2, 3, 4], 2, async (n) => {
+      if (n === 2) throw new Error('boom');
+      done.push(n);
+    });
+    expect(done.sort()).toEqual([1, 3, 4]);
+    expect(r.failed).toBe(1);
+    expect(r.deferred).toEqual([]);
+  });
+});

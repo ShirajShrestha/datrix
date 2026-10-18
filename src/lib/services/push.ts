@@ -114,28 +114,40 @@ export function _resetVapidForTests(): void {
   vapidWarned = false;
 }
 
-export async function sendToSub(
+export type SendResult = { result: 'sent' | 'gone' | 'error'; statusCode?: number };
+
+export async function sendToSubDetailed(
   sub: { endpoint: string; keys: { p256dh: string; auth: string } },
   payload: object,
   opts?: { sender?: typeof webpush.sendNotification },
-): Promise<'sent' | 'gone' | 'error'> {
+): Promise<SendResult> {
   try {
-    if (!ensureVapid()) return 'error';
+    // Defense in depth against parser differences with web-push's url.parse.
+    if (!isAllowedPushEndpoint(sub.endpoint)) return { result: 'error' };
+    if (!ensureVapid()) return { result: 'error' };
     const sender = opts?.sender ?? webpush.sendNotification.bind(webpush);
     await sender(
       { endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth } },
       JSON.stringify(payload),
       { TTL: 6 * 60 * 60, urgency: 'normal', timeout: 10_000 },
     );
-    return 'sent';
+    return { result: 'sent' };
   } catch (e) {
     const err = e as { statusCode?: unknown; name?: unknown } | null;
     const status = err?.statusCode;
-    if (status === 404 || status === 410) return 'gone';
+    if (status === 404 || status === 410) return { result: 'gone', statusCode: status };
     const tag = typeof status === 'number' ? `status ${status}` : typeof err?.name === 'string' ? err.name : 'unknown';
     console.warn(`Push send failed: ${tag}`);
-    return 'error';
+    return typeof status === 'number' ? { result: 'error', statusCode: status } : { result: 'error' };
   }
+}
+
+export async function sendToSub(
+  sub: { endpoint: string; keys: { p256dh: string; auth: string } },
+  payload: object,
+  opts?: { sender?: typeof webpush.sendNotification },
+): Promise<'sent' | 'gone' | 'error'> {
+  return (await sendToSubDetailed(sub, payload, opts)).result;
 }
 
 const ALLOWED_EXACT_HOSTS = ['fcm.googleapis.com', 'updates.push.services.mozilla.com', 'web.push.apple.com'];
@@ -147,6 +159,12 @@ const KEY_RE = /^[A-Za-z0-9_\-=]+$/;
 /** True only for https URLs on a known push-service host (no userinfo, no custom port). */
 export function isAllowedPushEndpoint(url: string): boolean {
   if (typeof url !== 'string' || url.length === 0 || url.length > MAX_ENDPOINT_LEN) return false;
+  // Backslashes, whitespace and control chars are parsed differently by WHATWG URL and legacy url.parse.
+  // eslint-disable-next-line no-control-regex
+  if (/[\\\s\u0000-\u001f\u007f-\u009f]/.test(url)) return false;
+  // No percent-escapes in the authority (e.g. fcm%2egoogleapis.com).
+  const authority = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i.exec(url)?.[1];
+  if (authority === undefined || authority.includes('%')) return false;
   let u: URL;
   try {
     u = new URL(url);
@@ -179,7 +197,11 @@ export function validateSubscribeBody(
   const sub = b.subscription;
   if (!sub || typeof sub !== 'object' || Array.isArray(sub)) return fail('Invalid subscription');
   const { endpoint, keys } = sub as Record<string, unknown>;
-  if (typeof endpoint !== 'string' || !isAllowedPushEndpoint(endpoint)) return fail('Invalid endpoint');
+  // Stored value must be exactly what the URL parser would emit (so uppercase hosts / implicit
+  // normalization are rejected; browsers always supply canonical lowercase endpoints).
+  if (typeof endpoint !== 'string' || !isAllowedPushEndpoint(endpoint) || new URL(endpoint).href !== endpoint) {
+    return fail('Invalid endpoint');
+  }
   if (!keys || typeof keys !== 'object' || Array.isArray(keys)) return fail('Invalid keys');
   const { p256dh, auth } = keys as Record<string, unknown>;
   if (!isKey(p256dh) || !isKey(auth)) return fail('Invalid keys');

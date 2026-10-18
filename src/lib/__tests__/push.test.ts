@@ -81,7 +81,7 @@ describe('buildPayload', () => {
 });
 
 describe('sendToSub', () => {
-  const sub = { endpoint: 'https://push.test/abc', keys: { p256dh: 'p', auth: 'a' } };
+  const sub = { endpoint: 'https://fcm.googleapis.com/fcm/send/abc', keys: { p256dh: 'p', auth: 'a' } };
   beforeEach(() => {
     _resetVapidForTests();
     vi.unstubAllEnvs();
@@ -150,7 +150,7 @@ describe('sendToSub', () => {
 
 describe('PushSub schema', () => {
   const valid = () => ({
-    endpoint: 'https://push.test/x', keys: { p256dh: 'p', auth: 'a' },
+    endpoint: 'https://fcm.googleapis.com/fcm/send/x', keys: { p256dh: 'p', auth: 'a' },
     categories: ['ai'], time: '08:00', timeZone: 'Asia/Kathmandu',
   });
   it('accepts valid and empty categories', () => {
@@ -249,5 +249,49 @@ describe('validateSubscribeBody', () => {
   });
   it('rejects non-objects', () => {
     for (const v of [null, undefined, 'x', 5, [], { subscription: 'x' }]) expect(validateSubscribeBody(v).ok).toBe(false);
+  });
+});
+
+describe('endpoint hardening', () => {
+  it.each([
+    'https://fcm.googleapis.com\\@evil.com/x',
+    'https://fcm.googleapis.com/x\ny',
+    'https://fcm.googleapis.com\t.evil.com/x',
+    'https://fcm.googleapis.com /x',
+    'https://fcm.googleapis.com./x',
+    'https://fcm%2egoogleapis.com/x',
+    'https://fcm.googleapis%2ecom/x',
+    'https://xn--fcm-googleapis-abc.com/x',
+    'https://xn--80ak6aa92e.push.apple.com.evil.com/x',
+  ])('rejects %s', (u) => expect(isAllowedPushEndpoint(u)).toBe(false));
+  it('accepts canonical endpoint', () => {
+    expect(isAllowedPushEndpoint('https://fcm.googleapis.com/fcm/send/abc')).toBe(true);
+  });
+  const body = (endpoint: string) => ({
+    subscription: { endpoint, keys: { p256dh: 'abc', auth: 'def' } }, categories: [], time: '08:00', timeZone: 'UTC',
+  });
+  it('validate accepts canonical lowercase, rejects uppercase host (href differs) - documented', () => {
+    expect(validateSubscribeBody(body('https://fcm.googleapis.com/fcm/send/abc')).ok).toBe(true);
+    expect(validateSubscribeBody(body('https://FCM.googleapis.com/fcm/send/abc')).ok).toBe(false);
+  });
+  it('sendToSub refuses disallowed endpoints without sending', async () => {
+    const sender = vi.fn();
+    const r = await sendToSub({ endpoint: 'https://evil.com/x', keys: { p256dh: 'p', auth: 'a' } }, {}, { sender: sender as never });
+    expect(r).toBe('error');
+    expect(sender).not.toHaveBeenCalled();
+  });
+});
+
+import { sendToSubDetailed } from '@/lib/services/push';
+describe('sendToSubDetailed status mapping', () => {
+  const sub = { endpoint: 'https://fcm.googleapis.com/fcm/send/abc', keys: { p256dh: 'p', auth: 'a' } };
+  beforeEach(() => { process.env.VAPID_SUBJECT = 'mailto:a@b.co'; process.env.VAPID_PUBLIC_KEY = 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U'; process.env.VAPID_PRIVATE_KEY = 'UUxI4O8-FbRouAevSmBQ6o18hgE4nSG3qwvJTfKc-ls'; _resetVapidForTests(); });
+  const fail = (statusCode: number) => vi.fn().mockRejectedValue(Object.assign(new Error('x'), { statusCode }));
+  it('404/410 -> gone', async () => {
+    expect((await sendToSubDetailed(sub, {}, { sender: fail(410) as never })).result).toBe('gone');
+    expect((await sendToSubDetailed(sub, {}, { sender: fail(404) as never })).result).toBe('gone');
+  });
+  it('400 -> error with statusCode', async () => {
+    expect(await sendToSubDetailed(sub, {}, { sender: fail(400) as never })).toEqual({ result: 'error', statusCode: 400 });
   });
 });

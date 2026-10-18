@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/db';
 import { PushSub } from '@/lib/models/PushSub';
 import { Article } from '@/lib/models/Article';
-import { buildPayload, isDue, sendToSub } from '@/lib/services/push';
-import { categoriesKey, localDateFor, runWithConcurrency } from '@/lib/services/pushDispatch';
+import { buildPayload, isDue, sendToSubDetailed, type SendResult } from '@/lib/services/push';
+import { categoriesKey, localDateFor, runWithConcurrency, SOFT_FAIL_STATUSES, MAX_SOFT_FAILS } from '@/lib/services/pushDispatch';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -64,31 +64,62 @@ export async function GET(request: NextRequest) {
       dueItems,
       CONCURRENCY,
       async (item) => {
-        // Claim first so overlapping ticks can't double-send.
-        const claim = await PushSub.findOneAndUpdate(
-          { _id: item._id, lastSentDate: { $ne: item.localDate } },
-          { $set: { lastSentDate: item.localDate } },
-          { new: false },
-        );
-        if (!claim) return;
-        const prev = claim.lastSentDate;
-        let result: 'sent' | 'gone' | 'error' = 'error';
+        // Claim-before-send is AT-MOST-ONCE by design: a crash/kill between the claim and the
+        // send loses that day's push for this subscription, but overlapping ticks never double-send.
+        let claimed = false;
+        let prev: string | undefined;
+        const revert = async () => {
+          try {
+            await PushSub.updateOne(
+              { _id: item._id, lastSentDate: item.localDate },
+              prev ? { $set: { lastSentDate: prev } } : { $unset: { lastSentDate: 1 } },
+            );
+          } catch {
+            /* best effort */
+          }
+        };
         try {
-          const payload = buildPayload(await topFor(item.categories));
-          result = await sendToSub({ endpoint: item.endpoint, keys: item.keys }, payload);
-        } catch {
-          result = 'error';
-        }
-        if (result === 'sent') sent++;
-        else if (result === 'gone') {
-          gone++;
-          await PushSub.deleteOne({ _id: item._id });
-        } else {
-          errors++;
-          await PushSub.updateOne(
-            { _id: item._id, lastSentDate: item.localDate },
-            prev ? { $set: { lastSentDate: prev } } : { $unset: { lastSentDate: 1 } },
+          const claim = await PushSub.findOneAndUpdate(
+            { _id: item._id, lastSentDate: { $ne: item.localDate } },
+            { $set: { lastSentDate: item.localDate } },
+            { new: false },
           );
+          if (!claim) return;
+          claimed = true;
+          prev = claim.lastSentDate;
+          let r: SendResult = { result: 'error' };
+          try {
+            const payload = buildPayload(await topFor(item.categories));
+            r = await sendToSubDetailed({ endpoint: item.endpoint, keys: item.keys }, payload);
+          } catch {
+            r = { result: 'error' };
+          }
+          if (r.result === 'sent') {
+            sent++;
+            await PushSub.updateOne({ _id: item._id, failCount: { $gt: 0 } }, { $set: { failCount: 0 } }).catch(() => {});
+          } else if (r.result === 'gone') {
+            gone++;
+            await PushSub.deleteOne({ _id: item._id });
+          } else {
+            errors++;
+            await revert();
+            if (r.statusCode !== undefined && SOFT_FAIL_STATUSES.includes(r.statusCode)) {
+              // Count at most one soft failure per local day; evict after MAX_SOFT_FAILS days.
+              const upd = await PushSub.findOneAndUpdate(
+                { _id: item._id, lastFailDate: { $ne: item.localDate } },
+                { $inc: { failCount: 1 }, $set: { lastFailDate: item.localDate } },
+                { new: true },
+              );
+              if (upd && (upd.failCount ?? 0) >= MAX_SOFT_FAILS) {
+                gone++;
+                await PushSub.deleteOne({ _id: item._id });
+              }
+            }
+          }
+        } catch {
+          // Never throw out of a lane. If we claimed but did not finish, release the claim.
+          errors++;
+          if (claimed) await revert();
         }
       },
       started + DEADLINE_MS,
