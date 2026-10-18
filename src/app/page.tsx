@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useSyncExternalStore } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import FilterBar, { Category, Importance } from '@/components/FilterBar';
 import NewsCard, { NewsArticle } from '@/components/NewsCard';
 import DigestPanel from '@/components/DigestPanel';
@@ -8,23 +8,9 @@ import { NewsGridSkeleton } from '@/components/Skeletons';
 import { usePrefs, effectiveCategories } from '@/lib/prefs';
 import { useHydrated } from '@/lib/useHydrated';
 import { getCategory } from '@/lib/categories';
+import { useSavedArticles, toggleSavedStored } from '@/lib/savedArticles';
 
-const SAVED_ARTICLES_KEY = 'newsintel_saved_articles';
 const ITEMS_PER_PAGE = 10;
-
-function useLocalStorageStore<T>(key: string, initialValue: T) {
-  const getValue = () => {
-    if (typeof window === 'undefined') return initialValue;
-    const item = localStorage.getItem(key);
-    return item ? JSON.parse(item) : initialValue;
-  };
-
-  return useSyncExternalStore(
-    () => () => {},
-    getValue,
-    () => initialValue
-  );
-}
 
 export default function Home() {
   const [articles, setArticles] = useState<NewsArticle[]>([]);
@@ -39,7 +25,7 @@ export default function Home() {
   const [prefs] = usePrefs();
   const chosenKey = effectiveCategories(prefs).join(',');
 
-  const savedArticles = useLocalStorageStore<NewsArticle[]>(SAVED_ARTICLES_KEY, []);
+  const savedArticles = useSavedArticles<NewsArticle>();
 
   // Reset a stale chip (e.g. category deselected in another tab) to 'all'.
   const effectiveSelected: Category =
@@ -89,25 +75,7 @@ export default function Home() {
   }, []);
 
   const handleSave = useCallback((article: NewsArticle) => {
-    const saved = localStorage.getItem(SAVED_ARTICLES_KEY);
-    let currentSaved: NewsArticle[] = [];
-    
-    if (saved) {
-      try {
-        currentSaved = JSON.parse(saved);
-      } catch (e) {
-        console.error('Error parsing saved articles:', e);
-      }
-    }
-
-    const exists = currentSaved.find(a => a._id === article._id);
-    if (exists) {
-      currentSaved = currentSaved.filter(a => a._id !== article._id);
-    } else {
-      currentSaved.push({ ...article, isSaved: true });
-    }
-
-    localStorage.setItem(SAVED_ARTICLES_KEY, JSON.stringify(currentSaved));
+    toggleSavedStored(article);
   }, []);
 
   const isArticleSaved = useCallback((articleId: string) => {

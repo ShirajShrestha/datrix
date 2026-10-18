@@ -4,38 +4,10 @@ import { useSyncExternalStore } from 'react';
 import NewsCard, { NewsArticle } from '@/components/NewsCard';
 import { NewsGridSkeleton } from '@/components/Skeletons';
 import { Bookmark } from 'lucide-react';
-import { SAVED_CHANGED_EVENT } from '@/lib/savedArticles';
-
-const SAVED_ARTICLES_KEY = 'newsintel_saved_articles';
-
-const snapCache = new Map<string, { raw: string | null; value: unknown }>();
-
-function subscribeSaved(cb: () => void) {
-  window.addEventListener(SAVED_CHANGED_EVENT, cb);
-  return () => window.removeEventListener(SAVED_CHANGED_EVENT, cb);
-}
-
-function useLocalStorageStore<T>(key: string, initialValue: T) {
-  const getValue = (): T => {
-    if (typeof window === 'undefined') return initialValue;
-    const raw = localStorage.getItem(key);
-    const hit = snapCache.get(key);
-    if (hit && hit.raw === raw) return hit.value as T;
-    let value: T = initialValue;
-    try {
-      value = raw ? JSON.parse(raw) : initialValue;
-    } catch {
-      value = initialValue;
-    }
-    snapCache.set(key, { raw, value });
-    return value;
-  };
-
-  return useSyncExternalStore(subscribeSaved, getValue, () => initialValue);
-}
+import { useSavedArticles, toggleSavedStored } from '@/lib/savedArticles';
 
 export default function SavedPage() {
-  const articles = useLocalStorageStore<NewsArticle[]>(SAVED_ARTICLES_KEY, []);
+  const articles = useSavedArticles<NewsArticle>();
   
   const loading = useSyncExternalStore(
     () => () => {},
@@ -44,26 +16,7 @@ export default function SavedPage() {
   );
 
   const handleSave = (article: NewsArticle) => {
-    const saved = localStorage.getItem(SAVED_ARTICLES_KEY);
-    let currentSaved: NewsArticle[] = [];
-    
-    if (saved) {
-      try {
-        currentSaved = JSON.parse(saved);
-      } catch (e) {
-        console.error('Error parsing saved articles:', e);
-      }
-    }
-
-    const exists = currentSaved.find(a => a._id === article._id);
-    if (exists) {
-      currentSaved = currentSaved.filter(a => a._id !== article._id);
-    } else {
-      currentSaved.push({ ...article, isSaved: true });
-    }
-
-    localStorage.setItem(SAVED_ARTICLES_KEY, JSON.stringify(currentSaved));
-    window.location.reload();
+    toggleSavedStored(article);
   };
 
   return (

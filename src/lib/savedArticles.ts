@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from 'react';
+
 export const SAVED_ARTICLES_KEY = 'newsintel_saved_articles';
 export const SAVED_CHANGED_EVENT = 'newsintel:saved-changed';
 
@@ -37,4 +39,38 @@ export function toggleSavedStored<T extends { _id: string }>(article: T): boolea
   }
   notifySavedChanged();
   return next.some((a) => a._id === article._id);
+}
+
+// useSyncExternalStore needs getSnapshot to return the SAME reference until the data changes,
+// so the parsed list is cached by the raw localStorage string.
+const EMPTY: never[] = [];
+let snapRaw: string | null | undefined;
+let snapValue: unknown[] = EMPTY;
+
+export function getSavedSnapshot<T extends { _id: string }>(): T[] {
+  if (typeof window === 'undefined') return EMPTY;
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(SAVED_ARTICLES_KEY);
+  } catch {
+    return EMPTY;
+  }
+  if (raw === snapRaw) return snapValue as T[];
+  snapRaw = raw;
+  snapValue = readSaved<T>();
+  return snapValue as T[];
+}
+
+export function subscribeSaved(cb: () => void): () => void {
+  window.addEventListener(SAVED_CHANGED_EVENT, cb);
+  window.addEventListener('storage', cb);
+  return () => {
+    window.removeEventListener(SAVED_CHANGED_EVENT, cb);
+    window.removeEventListener('storage', cb);
+  };
+}
+
+/** Live, cross-component view of the on-device saved list. */
+export function useSavedArticles<T extends { _id: string }>(): T[] {
+  return useSyncExternalStore(subscribeSaved, getSavedSnapshot<T>, () => EMPTY as T[]);
 }
