@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/db';
 import { Article } from '@/lib/models/Article';
 import { buildArticleQuery } from '@/lib/articleQuery';
+import { toArticleDTO } from '@/lib/articlePayload';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,20 +13,7 @@ export async function GET(request: NextRequest) {
     await connectToDatabase();
     const docs = await Article.find(filter).sort(sort).limit(limit).lean();
 
-    const articles = docs.map((a) => ({
-      _id: String(a._id),
-      title: a.title,
-      url: a.url,
-      source: a.source,
-      // Transitional: derived single category for the legacy UI (removed in Tasks 13/14).
-      category: a.categories?.[0],
-      categories: a.categories ?? [],
-      imageUrl: a.imageUrl,
-      sources: a.sources ?? [],
-      summary: a.summary,
-      publishedAt: a.publishedAt,
-      importanceScore: a.importanceScore,
-    }));
+    const articles = docs.map((a) => toArticleDTO(a));
 
     return NextResponse.json(
       { success: true, count: articles.length, articles },
