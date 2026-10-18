@@ -53,4 +53,8 @@ describe('category registry', () => {
   it('entertainment keeps its Guardian sections', () => {
     expect(getCategory('entertainment')?.guardianSections).toEqual(['culture', 'film', 'music', 'games', 'tv-and-radio']);
   });
+
+  it('normalizeSlug rejects prototype keys', () => {
+    for (const k of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) expect(normalizeSlug(k)).toBeNull();
+  });
 });

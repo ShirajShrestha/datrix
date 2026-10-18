@@ -164,16 +164,17 @@ export const CATEGORIES: CategoryDef[] = [
   },
 ];
 
-const LEGACY: Record<string, CategorySlug> = { tech: 'technology', economy: 'business' };
+const LEGACY = new Map<string, CategorySlug>([['tech', 'technology'], ['economy', 'business']]);
 
 export function getCategory(slug: string): CategoryDef | undefined {
   return CATEGORIES.find((c) => c.slug === slug);
 }
 
 export function normalizeSlug(raw: string): CategorySlug | null {
-  const s = (raw ?? '').trim().toLowerCase();
-  if (LEGACY[s]) return LEGACY[s];
-  return getCategory(s)?.slug ?? null;
+  if (typeof raw !== 'string') return null;
+  const s = raw.trim().toLowerCase();
+  const mapped = LEGACY.get(s) ?? s;
+  return CATEGORIES.find((c) => c.slug === mapped)?.slug ?? null;
 }
 
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

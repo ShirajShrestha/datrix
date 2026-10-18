@@ -145,3 +145,77 @@ describe('previous visit', () => {
     expect(s.getPreviousVisit()).toBeNull();
   });
 });
+
+describe('hardening', () => {
+  it('prototype keys never become categories', () => {
+    expect(sanitizePrefs({ categories: ['constructor', '__proto__', 'tech', 'ai'] }).categories).toEqual(['technology', 'ai']);
+  });
+  it('__proto__ in JSON does not pollute', () => {
+    const r = sanitizePrefs('{"__proto__":{"categories":["ai"],"polluted":1}}');
+    expect(r).toEqual(DEFAULT_PREFS);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(({} as Record<string, unknown>).categories).toBeUndefined();
+  });
+  it('failed persist over an existing value does not revert; recovers later', () => {
+    const st = fakeStorage();
+    st.data.set(PREFS_KEY, JSON.stringify({ categories: ['world'] }));
+    let broken = true;
+    const s = createPrefsStore(() => ({
+      getItem: st.getItem,
+      setItem(k, v) { if (broken) throw new Error('quota'); st.setItem(k, v); },
+    }));
+    expect(s.getSnapshot().categories).toEqual(['world']);
+    s.setPrefs({ categories: ['ai', 'law'] });
+    for (let i = 0; i < 3; i++) expect(s.getSnapshot().categories).toEqual(['ai', 'law']);
+    broken = false;
+    s.setPrefs({ onboarded: true });
+    expect(JSON.parse(st.data.get(PREFS_KEY)!)).toMatchObject({ categories: ['ai', 'law'], onboarded: true });
+    st.data.set(PREFS_KEY, JSON.stringify({ categories: ['health'] })); // reads storage again
+    expect(s.getSnapshot().categories).toEqual(['health']);
+  });
+});
+
+describe('attach (fake window)', () => {
+  function fakeWin() {
+    const wl: Record<string, (e?: unknown) => void> = {};
+    const dl: Record<string, () => void> = {};
+    const doc = { visibilityState: 'visible', addEventListener: (t: string, f: () => void) => { dl[t] = f; } };
+    const win = { document: doc, addEventListener: (t: string, f: (e?: unknown) => void) => { wl[t] = f; } };
+    return { win: win as unknown as Window, wl, dl, doc };
+  }
+  it('storage event notifies only for our key or null', () => {
+    const s = createPrefsStore(() => fakeStorage());
+    const { win, wl } = fakeWin();
+    s.attach(win);
+    let n = 0;
+    s.subscribe(() => n++);
+    wl.storage({ key: 'other' });
+    expect(n).toBe(0);
+    wl.storage({ key: PREFS_KEY });
+    wl.storage({ key: null });
+    expect(n).toBe(2);
+  });
+  it('pagehide / hidden touch lastVisit once, keep other prefs, dedupe within 1s', () => {
+    const st = fakeStorage();
+    st.data.set(PREFS_KEY, JSON.stringify({ lastVisit: 100 }));
+    const s = createPrefsStore(() => st);
+    const { win, wl, dl, doc } = fakeWin();
+    let t = 10_000;
+    s.attach(win, () => t);
+    s.setPrefs({ notifyEnabled: true });
+    wl.pagehide();
+    doc.visibilityState = 'hidden';
+    t += 10;
+    dl.visibilitychange(); // deduped
+    expect(s.getSnapshot()).toMatchObject({ lastVisit: 10_000, notifyEnabled: true });
+    s.setPrefs({ onboarded: true });
+    t += 5000;
+    dl.visibilitychange();
+    expect(s.getSnapshot()).toMatchObject({ lastVisit: 15_010, notifyEnabled: true, onboarded: true });
+    doc.visibilityState = 'visible';
+    t += 5000;
+    dl.visibilitychange();
+    expect(s.getSnapshot().lastVisit).toBe(15_010);
+    expect(s.getPreviousVisit()).toBe(100);
+  });
+});

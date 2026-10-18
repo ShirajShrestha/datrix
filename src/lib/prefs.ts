@@ -44,7 +44,7 @@ export function sanitizePrefs(raw: unknown): Prefs {
       for (const item of o.categories) {
         if (typeof item !== 'string') continue;
         const slug = normalizeSlug(item);
-        if (slug) seen.add(slug);
+        if (slug && ALL_SLUGS.includes(slug)) seen.add(slug);
       }
       categories = [...seen];
     }
@@ -86,7 +86,7 @@ export interface PrefsStore {
   getPreviousVisit(): number | null;
   touchLastVisit(now: number): void;
   /** Idempotently register storage/pagehide/visibilitychange listeners. */
-  attach(win: Window | undefined): void;
+  attach(win: Window | undefined, now?: () => number): void;
 }
 
 export function createPrefsStore(getStorage: () => StorageLike | null): PrefsStore {
@@ -102,11 +102,10 @@ export function createPrefsStore(getStorage: () => StorageLike | null): PrefsSto
   function readRaw(): string | null {
     try {
       const s = getStorage();
-      if (s) {
-        const v = s.getItem(PREFS_KEY);
-        if (v === null && persistFailed) return memRaw;
-        return v;
-      }
+      // After a failed write, memory is the source of truth until a
+      // storage event or a successful write shows storage is usable again.
+      if (persistFailed) return memRaw;
+      if (s) return s.getItem(PREFS_KEY);
     } catch {
       /* blocked storage: fall through */
     }
@@ -157,16 +156,27 @@ export function createPrefsStore(getStorage: () => StorageLike | null): PrefsSto
     setPrefs({ lastVisit: now });
   }
 
-  function attach(win: Window | undefined) {
+  function attach(win: Window | undefined, now: () => number = Date.now) {
     if (attached || !win) return;
     attached = true;
     getPreviousVisit();
+    let lastTouchAt = -Infinity;
+    // pagehide + visibilitychange(hidden) often fire together: write once per second.
+    const touch = () => {
+      const t = now();
+      if (t - lastTouchAt < 1000) return;
+      lastTouchAt = t;
+      touchLastVisit(t);
+    };
     win.addEventListener('storage', (e: StorageEvent) => {
-      if (e.key === null || e.key === PREFS_KEY) notify();
+      if (e.key === null || e.key === PREFS_KEY) {
+        persistFailed = false; // another tab wrote, so storage is readable again
+        notify();
+      }
     });
-    win.addEventListener('pagehide', () => touchLastVisit(Date.now()));
+    win.addEventListener('pagehide', touch);
     win.document?.addEventListener('visibilitychange', () => {
-      if (win.document.visibilityState === 'hidden') touchLastVisit(Date.now());
+      if (win.document.visibilityState === 'hidden') touch();
     });
   }
 
@@ -188,9 +198,14 @@ export function createPrefsStore(getStorage: () => StorageLike | null): PrefsSto
 
 const browserStore = createPrefsStore(() => (typeof window === 'undefined' ? null : window.localStorage));
 
-function clientStore(): PrefsStore {
+// Render only reads (getSnapshot / getPreviousVisit capture lazily on first
+// client read). Global listeners are registered at subscribe time (effect phase).
+const subscribeBrowser = (l: () => void) => {
   if (typeof window !== 'undefined') browserStore.attach(window);
-  return browserStore;
+  return browserStore.subscribe(l);
+};
+function clientStore(): PrefsStore {
+  return { ...browserStore, subscribe: subscribeBrowser };
 }
 
 export function usePrefs(): [Prefs, (patch: Partial<Prefs>) => void] {
