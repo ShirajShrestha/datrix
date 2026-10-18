@@ -34,9 +34,9 @@ Legacy slugs `tech` and `economy` are mapped to `technology` and `business`. An 
 ## Architecture
 
 - **Ingest pipeline** (`src/lib/services/ingest.ts`, `GET /api/cron/news`): fetch all sources in parallel (one failing source does not stop the run) -> score -> deduplicate (token-similarity within 48 h) -> keep the top 25 per category -> resolve missing images (at most 60 page fetches) -> summarize articles lacking an LLM summary (batches of 8 per call) -> bulk upsert into MongoDB. It works inside a 50 s time budget and returns an `IngestReport`.
-- **Read API** (`GET /api/articles`, plus `/api/cron/digest`): reads stored articles; filtering by the categories the client sends. The browser never calls the news APIs.
+- **Read API** (`GET /api/articles`): reads stored articles, filtered by the categories the client sends. `GET /api/cron/digest` also exists but is not scheduled. The browser never calls the news APIs.
 - **Device-only prefs**: categories, notify time and onboarding state are stored in `localStorage` (`datrix_prefs`). Saved articles use `newsintel_saved_articles`.
-- **Push subscriptions** (`/api/push/subscribe`, `/unsubscribe`, `/test`): a subscription is stored with its categories, preferred time and IANA time zone. `GET /api/cron/push` sends to subscriptions that are due (their local time has reached the preferred time, within a 3 hour catch-up window, and nothing was sent yet today).
+- **Push subscriptions** (`/api/push/subscribe`, `/api/push/unsubscribe`, `/api/push/test`): a subscription is stored (at most `MAX_PUSH_SUBSCRIPTIONS`, default 2000; over the cap the API answers 503 "Subscription limit reached") with its categories, preferred time and IANA time zone. `GET /api/cron/push` sends to subscriptions that are due (their local time has reached the preferred time, within a 3 hour catch-up window, and nothing was sent yet today).
 - **Schedulers**: GitHub Actions only (`.github/workflows`). `vercel.json` has no crons.
 - **Service worker**: hand-written `public/sw.js` (runtime caching, offline page, push handling). It is not registered by `next dev`.
 
@@ -59,6 +59,7 @@ Copy `.env.example` to `.env.local`. Never commit real values.
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | Required for push | Same value as `VAPID_PUBLIC_KEY`; the browser needs it to subscribe. Inlined at build time, so changing it needs a rebuild/redeploy. |
 | `VAPID_PRIVATE_KEY` | Required for push | VAPID private key. Keep secret. |
 | `VAPID_SUBJECT` | Required for push | Contact for push services, e.g. `mailto:you@example.com`. |
+| `MAX_PUSH_SUBSCRIPTIONS` | Optional | Cap on stored push subscriptions; default `2000`. Beyond it `POST /api/push/subscribe` returns 503 "Subscription limit reached". |
 
 With no source keys the app still ingests RSS. With no LLM keys, summaries are extractive.
 
@@ -86,13 +87,33 @@ Workflows:
 
 Both also have `workflow_dispatch` for manual runs.
 
-## Deploying to Vercel
+## Deploying to Vercel (owner walkthrough)
 
-1. Import the repo and set all environment variables above (Production, and Preview if you use it). `NEXT_PUBLIC_VAPID_PUBLIC_KEY` must be set before the build.
-2. Deploy, then set `APP_URL` and `CRON_SECRET` in GitHub secrets.
-3. Run the "Ingest News" workflow once manually to fill the database.
+1. **MongoDB Atlas.** Create a free (M0) cluster. Add a database user with a strong, unique password. Under Network Access allow `0.0.0.0/0`: Vercel functions have no fixed IPs, so this is required. The tradeoff is that the database is reachable from anywhere and protected only by the user credentials, so use a long random password and a user limited to this database. Copy the connection string and add a database name as the path segment, e.g. `mongodb+srv://USER:PASSWORD@cluster.mongodb.net/datrix?retryWrites=true&w=majority`. That is `MONGODB_URI`.
+2. **API keys.** All are optional: with none of them the app ingests RSS only, summaries are extractive, and missing sources are skipped.
+   - Guardian: https://open-platform.theguardian.com/register (`GUARDIAN_API_KEY`)
+   - GNews: https://gnews.io (`GNEWS_API_KEY`)
+   - MediaStack: https://mediastack.com (`MEDIASTACK_API_KEY`). Read the quota warning under Free-tier usage first.
+   - Groq: https://console.groq.com (`GROQ_API_KEY`)
+   - Gemini: https://aistudio.google.com (`GEMINI_API_KEY`)
+3. **VAPID keys** (needed for push): run `npx web-push generate-vapid-keys`. Choose `VAPID_SUBJECT`, e.g. `mailto:you@example.com`.
+4. **CRON_SECRET**: generate a new one with `openssl rand -hex 32`. Do NOT reuse any secret that was ever exposed in the old repository history; treat those as compromised.
+5. **Vercel env vars.** Import the repo into Vercel and set every variable from the table above (Production, plus Preview if you want). `NEXT_PUBLIC_VAPID_PUBLIC_KEY` is inlined at build time, so changing it requires a redeploy.
+6. **Deploy.** `vercel.json` no longer defines any crons, so the Vercel dashboard shows none; scheduling is done entirely by GitHub Actions.
+7. **GitHub.** In the repo, Settings -> Secrets and variables -> Actions, set `APP_URL` (`https://<project>.vercel.app`, no trailing slash) and `CRON_SECRET` (same value as in Vercel). Delete any old secrets and workflows left from before. Make sure Actions are enabled for the repo.
+8. **First ingest.** Actions -> "Ingest News" -> Run workflow (`workflow_dispatch`) and confirm it succeeds. Open the site and check that onboarding appears, categories can be chosen and articles load.
+9. **Install and notifications.** Chrome/Android: use "Install app". iOS: Share -> Add to Home Screen first (iOS 16.4+), then open from the home screen. In Settings enable notifications and press "Send test notification".
+10. **Daily push.** The "Push Dispatch" workflow runs every 15 minutes. GitHub's scheduler can delay runs, and GitHub disables scheduled workflows after 60 days of repository inactivity on public repos (re-enable them in the Actions tab).
 
-Function duration: `/api/cron/news` and `/api/cron/push` set `maxDuration = 60`. The ingest stops starting new work after about 50 s. The Vercel Hobby plan has its own max function duration (check the current limit in Vercel's docs; if it is below 60 s the platform limit wins and a run may be cut short). The vercel.json cron feature is not used.
+Function duration: `/api/cron/news` and `/api/cron/push` set `maxDuration = 60`; the ingest stops starting new work after about 50 s. Verified 2026-10-18 against Vercel's [duration docs](https://vercel.com/docs/functions/configuring-functions/duration): with fluid compute (default) the Hobby plan default and maximum are 300 s, so 60 s is allowed.
+
+### Troubleshooting
+
+- Workflow fails with 401: `CRON_SECRET` in GitHub differs from the one in Vercel, or the Vercel env var is unset.
+- Workflow fails with a connection/DNS error: check `APP_URL` (scheme, no trailing slash).
+- Empty feed: the ingest has not run yet (or `MONGODB_URI` is wrong).
+- Notifications "unsupported": you are on `npm run dev`, a browser without push support, an iOS tab not added to the Home Screen, or `NEXT_PUBLIC_VAPID_PUBLIC_KEY` was missing at build time.
+- GNews/MediaStack HTTP 429 in logs: free quota exhausted; harmless, the other sources still run.
 
 ## Local development
 
@@ -141,14 +162,14 @@ Counts below come from the code (`src/lib/categories.ts`, source adapters), for 
 | Source | Calls per run | Per month (30 runs) | Documented free limit | Verdict |
 |--------|---------------|---------------------|-----------------------|---------|
 | RSS feeds | 47 feed requests | n/a | none | fine |
-| Guardian API | 19 (unique sections, shared across categories) | 570 | dev key: 12 req/s, 5,000 req/day ([access page](https://open-platform.theguardian.com/access/)) | fine; adapter requests sections in parallel, 19 calls at once is above the 12 req/s figure, so some may be rate-limited. Check the access page for current limits |
-| GNews | 7 (categories with a GNews topic) | 210 | about 100 req/day ([gnews.io pricing](https://gnews.io/)) | fine |
-| MediaStack | 7 (distinct MediaStack categories) | 210 | 500 req/month ([mediastack.com](https://mediastack.com/product)) | within budget (210 <= 500) |
+| Guardian API | 19 (unique sections, shared across categories), all sent in parallel (`Promise.all`) | 570 | Not verified: the access page could not be fetched on 2026-10-18. Commonly cited developer-key limits are 12 req/s and 5,000 req/day; check [the access page](https://open-platform.theguardian.com/access/) before relying on this. | Unverified. 19 simultaneous requests may exceed a per-second limit |
+| GNews | 7 (categories with a GNews topic) | 210 | Free plan: 100 requests/day, 10 articles/request, 12 h delay (checked 2026-10-18 on [gnews.io](https://gnews.io/#pricing)) | within budget |
+| MediaStack | 7 (distinct MediaStack categories) | 210 | Free plan: 100 calls/month (checked 2026-10-18 on [mediastack.com/product](https://mediastack.com/product)) | OVER budget |
 | `og:image` page fetches | at most 60 | n/a | none (hotlink to publishers) | fine |
 | Groq / Gemini | at most ceil(articles needing a summary / 8) per provider | n/a | provider-defined, may change: see [Groq limits](https://console.groq.com/docs/rate-limits) and [Gemini limits](https://ai.google.dev/gemini-api/docs/rate-limits) | see below |
 | Push tick (every 15 min) | 0 external API calls unless subscriptions are due; then one push-service request per due subscription | n/a | n/a | fine |
 
-WARNING: MediaStack allows 500 requests per month. At 7 calls per daily run that is 210, so the budget holds. If you add MediaStack categories or run ingest more than once a day, budget = runs per day x calls x 30 and must stay <= 500; at 2 runs/day the current setup would use 420, at 3 runs/day 630 (over). Mitigation: remove `mediastackCategory` from categories in `src/lib/categories.ts`. The same applies to GNews (about 100/day: 7 calls leaves room for at most about 14 runs per day).
+WARNING: MediaStack's free plan allows only 100 calls per month (verified 2026-10-18). One ingest per day makes 7 calls, i.e. 210 per month, so the quota is exhausted after about 14 days and later runs get HTTP 429 (harmless to the rest of the ingest, but MediaStack contributes nothing for the rest of the month). Budget = runs per day x calls x 30 and must be <= 100. Mitigations: leave `MEDIASTACK_API_KEY` unset (the source is skipped), or remove `mediastackCategory` from most categories in `src/lib/categories.ts` so that 3 or fewer remain (3 x 30 = 90). GNews allows 100/day: 7 calls per run leaves room for about 14 runs per day.
 
 Example real run (scratch database, not the production database, RSS + Guardian + GNews + MediaStack keys set, no LLM keys):
 
