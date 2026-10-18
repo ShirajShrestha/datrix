@@ -88,7 +88,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const budget: any = await BriefBudget.findOneAndUpdate(
       { _id: bucket },
       { $inc: { count: 1 }, $setOnInsert: { expireAt: new Date((Number(bucket) + 2) * HOUR) } },
-      { upsert: true, new: true },
+      { upsert: true, returnDocument: 'after' },
     ).lean();
     if ((budget?.count ?? 1) > maxPerHour()) {
       // Over budget: refund the attempt and retry in the next hour bucket.
