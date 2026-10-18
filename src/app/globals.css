@@ -209,3 +209,23 @@ a:focus-visible {
 @media (hover: none) {
   .card-actions { opacity: 1; }
 }
+
+/* Story modal */
+body.story-open { overflow: hidden; }
+.story-dialog {
+  padding: 0;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  width: min(720px, 100vw);
+  max-width: 100vw;
+  max-height: 90dvh;
+  margin: auto;
+  overflow: hidden;
+  border-radius: 12px;
+}
+.story-dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+.story-body { max-height: 90dvh; overflow-y: auto; overscroll-behavior: contain; }
+@media (max-width: 639px) {
+  .story-dialog { margin: auto 0 0 0; width: 100vw; border-radius: 16px 16px 0 0; }
+}

@@ -56,7 +56,7 @@ for (const c of CATEGORIES) {
 const defaultCategory: CatStyle = { border: 'var(--border-highlight)', text: 'var(--text-muted)', bg: 'transparent', dot: 'var(--text-muted)', tint: 'transparent' };
 
 /** Registry slugs for an article, tolerant of legacy/malformed data. */
-function resolveSlugs(article: NewsArticle): string[] {
+export function resolveSlugs(article: NewsArticle): string[] {
   const raw: unknown[] = [
     ...(Array.isArray(article.categories) ? article.categories : []),
     article.category,
@@ -70,7 +70,7 @@ function resolveSlugs(article: NewsArticle): string[] {
   return out;
 }
 
-function relativeTime(value: string | Date): string | null {
+export function relativeTime(value: string | Date): string | null {
   const d = value instanceof Date ? value : new Date(value);
   if (!Number.isFinite(d.getTime())) return null;
   try {

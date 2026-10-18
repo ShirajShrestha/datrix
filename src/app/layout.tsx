@@ -8,6 +8,7 @@ import MobileHeader from "@/components/MobileHeader";
 import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
 import PushSync from "@/components/PushSync";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { StoryModalProvider } from "@/components/StoryModalProvider";
 
 const inter = Inter({
   variable: "--font-sans",
@@ -60,6 +61,7 @@ export default function RootLayout({
     <html lang="en" className={`${inter.variable} ${lora.variable} ${playfair.variable} ${dmSans.variable}`} suppressHydrationWarning>
       <body className="antialiased bg-[var(--bg-base)] text-[var(--text-primary)]">
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
+          <StoryModalProvider>
           <div className="flex min-h-screen">
             <Sidebar />
             <main className="flex-1 min-w-0 pb-20 lg:pb-0">
@@ -71,6 +73,7 @@ export default function RootLayout({
             <ServiceWorkerRegister />
             <PushSync />
           </div>
+          </StoryModalProvider>
         </ThemeProvider>
       </body>
     </html>
