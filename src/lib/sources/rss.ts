@@ -24,7 +24,7 @@ const parser = new Parser<Record<string, never>, RssItem>({
   timeout: FEED_TIMEOUT_MS,
   headers: { 'User-Agent': 'Datrix/2.0 (+news aggregator)' },
   customFields: {
-    item: ['media:thumbnail', 'media:content', 'media:group'] as unknown as string[],
+    item: ['media:thumbnail', 'media:content', 'media:group'] as never,
   },
 });
 
