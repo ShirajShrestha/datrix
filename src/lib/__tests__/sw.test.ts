@@ -130,6 +130,17 @@ describe("sw articles network-first", () => {
     expect(await stored!.text()).toBe("NET");
   });
 
+  it("per-story responses go to their own cache and never touch the feed list cache", async () => {
+    const { sw, caches } = load(async () => basic("STORY", { headers: { "Cache-Control": "s-maxage=60" } }));
+    await seed(caches, sw, "/api/articles?x=1", "LIST", 1000);
+    const e = ev(req("/api/articles/" + "a".repeat(24)));
+    await sw.networkFirstArticles(e);
+    await Promise.all(e.pending);
+    expect(await (await caches.open(sw.STORY_CACHE)).match(req("/api/articles/" + "a".repeat(24)))).toBeDefined();
+    expect(await (await caches.open(sw.ARTICLES_CACHE)).match(req("/api/articles/" + "a".repeat(24)))).toBeUndefined();
+    expect(await (await caches.open(sw.ARTICLES_CACHE)).match(req("/api/articles?x=1"))).toBeDefined();
+  });
+
   it("network failure -> cache if younger than 6h", async () => {
     const { sw, caches } = load();
     await seed(caches, sw, "/api/articles?x=1", "CACHED", 5 * HOUR);

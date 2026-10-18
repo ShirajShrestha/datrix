@@ -8,7 +8,10 @@ const STATIC_CACHE = `datrix-static-${VERSION}`;
 const SHELL_CACHE = `datrix-shell-${VERSION}`;
 const IMAGE_CACHE = `datrix-images-${VERSION}`;
 const ARTICLES_CACHE = `datrix-articles-${VERSION}`; // versioned so a bump purges old entries
-const ALL_CACHES = [STATIC_CACHE, SHELL_CACHE, IMAGE_CACHE, ARTICLES_CACHE];
+// Per-story responses live apart from the feed list so they can never evict it.
+const STORY_CACHE = `datrix-story-${VERSION}`;
+const STORY_MAX_ENTRIES = 40;
+const ALL_CACHES = [STATIC_CACHE, SHELL_CACHE, IMAGE_CACHE, ARTICLES_CACHE, STORY_CACHE];
 
 const ARTICLES_MAX_ENTRIES = 24;
 const ARTICLES_MAX_AGE_MS = 6 * 60 * 60 * 1000; // cached list is only a offline/slow-network fallback
@@ -101,12 +104,15 @@ const offlineJson = () =>
 // If the network is merely slow and nothing usable is cached, we keep waiting for it (a 503 would be worse).
 async function networkFirstArticles(event) {
   const request = event.request;
-  const cache = await caches.open(ARTICLES_CACHE);
+  const isStory = new URL(request.url).pathname !== '/api/articles';
+  const cacheName = isStory ? STORY_CACHE : ARTICLES_CACHE;
+  const maxEntries = isStory ? STORY_MAX_ENTRIES : ARTICLES_MAX_ENTRIES;
+  const cache = await caches.open(cacheName);
   const network = fetch(request).then(
     (res) => {
       if (isCacheable(res)) {
         const copy = res.clone();
-        event.waitUntil(safePut(cache, request, copy, true).then(() => trim(ARTICLES_CACHE, ARTICLES_MAX_ENTRIES)));
+        event.waitUntil(safePut(cache, request, copy, true).then(() => trim(cacheName, maxEntries)));
       }
       return res;
     },
@@ -204,7 +210,7 @@ self.addEventListener('fetch', (event) => {
 });
 
 // Test-only hook (harmless in production): exposes internals to src/lib/__tests__/sw.test.ts.
-self.__datrixSw = { parsePushData, safeNotificationUrl, handleNotificationClick, routeFor, isCacheable, isLegacyCacheName, navigationHandler, networkFirstArticles, cacheFirst, safePut, SHELL_CACHE, ARTICLES_CACHE, ARTICLES_MAX_AGE_MS, ARTICLES_NETWORK_TIMEOUT_MS };
+self.__datrixSw = { parsePushData, safeNotificationUrl, handleNotificationClick, routeFor, isCacheable, isLegacyCacheName, navigationHandler, networkFirstArticles, cacheFirst, safePut, SHELL_CACHE, ARTICLES_CACHE, STORY_CACHE, ARTICLES_MAX_AGE_MS, ARTICLES_NETWORK_TIMEOUT_MS };
 
 
 // ---- 6. Push ---------------------------------------------------------------
