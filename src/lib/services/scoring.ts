@@ -66,10 +66,16 @@ function topicWeight(categories: CategorySlug[]): number {
   return max > 0 ? max * TOPIC_SCALE : DEFAULT_TOPIC_WEIGHT;
 }
 
+function timeOf(d: unknown): number {
+  if (d === undefined || d === null) return NaN;
+  return d instanceof Date ? d.getTime() : new Date(d as string).getTime();
+}
+
 function calculateFreshnessScore(publishedAt: Date): number {
-  const now = new Date();
-  const hoursDiff = (now.getTime() - publishedAt.getTime()) / (1000 * 60 * 60);
-  
+  const t = timeOf(publishedAt);
+  if (Number.isNaN(t)) return 0.3; // invalid/missing date is treated as old
+  const hoursDiff = (Date.now() - t) / (1000 * 60 * 60);
+
   if (hoursDiff <= 1) return 1.0;
   if (hoursDiff <= 6) return 0.9;
   if (hoursDiff <= 12) return 0.8;
@@ -79,56 +85,147 @@ function calculateFreshnessScore(publishedAt: Date): number {
 }
 
 function normalizeTitle(title: string): string {
-  return title.toLowerCase()
+  return (title || '').toLowerCase()
     .replace(/[^a-z0-9\s]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-function calculateFrequencyScore(article: ScoredArticle, allArticles: ScoredArticle[]): number {
-  const normalized = normalizeTitle(article.title);
-  const words = normalized.split(' ').filter(w => w.length > 3);
-  
-  let matchCount = 0;
-  for (const other of allArticles) {
-    if (other.url === article.url) continue;
-    
-    const otherNormalized = normalizeTitle(other.title);
-    const commonWords = words.filter(w => otherNormalized.includes(w));
-    
-    if (commonWords.length >= 3) {
-      matchCount++;
-    }
+// ---- Story similarity -------------------------------------------------------------------
+// Limitation: matching is purely lexical (light stemming, no synonym/alias table), so
+// "Fed holds rates steady" and "Federal Reserve leaves rates unchanged" do NOT match.
+
+const STOPWORDS = new Set([
+  'the', 'and', 'for', 'with', 'from', 'that', 'this', 'are', 'was', 'were', 'has', 'have', 'had',
+  'will', 'its', 'but', 'not', 'you', 'your', 'who', 'what', 'when', 'where', 'why', 'how', 'into',
+  'over', 'after', 'amid', 'about', 'than', 'then', 'they', 'their', 'his', 'her', 'can', 'could',
+  'would', 'should', 'may', 'says', 'said', 'new', 'more', 'out', 'off', 'all', 'one', 'two',
+]);
+
+const SUFFIX_SEP = /\s+[-|\u2013\u2014]\s+/;
+const WINDOW_MS = 48 * 60 * 60 * 1000;
+
+function stem(w: string): string {
+  if (/^\d+$/.test(w)) return w;
+  if (w.length > 5 && w.endsWith('ing')) return w.slice(0, -3);
+  if (w.length > 4 && w.endsWith('ed')) return w.slice(0, -2);
+  if (w.length > 4 && w.endsWith('ly')) return w.slice(0, -2);
+  if (w.length > 4 && /(ss|x|z|ch|sh)es$/.test(w)) return w.slice(0, -2);
+  if (w.length > 3 && w.endsWith('s') && !w.endsWith('ss')) return w.slice(0, -1);
+  return w;
+}
+
+interface TitleInfo {
+  tokens: Set<string>;
+  nums: Set<string>;
+  time: number;
+  url: string;
+  norm: string;
+  source: string;
+}
+
+function tokenize(title: string): { tokens: Set<string>; nums: Set<string> } {
+  let t = title || '';
+  const parts = t.split(SUFFIX_SEP);
+  if (parts.length > 1 && parts[parts.length - 1].trim().split(/\s+/).length <= 4) {
+    t = parts.slice(0, -1).join(' ');
   }
-  
-  return Math.min(matchCount / 5, 1);
+  const tokens = new Set<string>();
+  const nums = new Set<string>();
+  for (const raw of t.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)) {
+    if (!raw) continue;
+    if (/^\d+$/.test(raw)) { tokens.add(raw); nums.add(raw); continue; }
+    if (raw.length <= 2 || STOPWORDS.has(raw)) continue;
+    const st = stem(raw);
+    if (st.length > 2) tokens.add(st);
+  }
+  return { tokens, nums };
 }
 
-function wordSet(title: string): Set<string> {
-  return new Set(normalizeTitle(title).split(' ').filter(Boolean));
+function buildInfo(a: ScoredArticle): TitleInfo {
+  const { tokens, nums } = tokenize(a.title);
+  return { tokens, nums, time: timeOf(a.publishedAt), url: a.url, norm: normalizeTitle(a.title), source: a.source };
 }
 
-function jaccard(a: Set<string>, b: Set<string>): number {
-  let inter = 0;
-  a.forEach((w) => { if (b.has(w)) inter++; });
-  const union = a.size + b.size - inter;
-  return union === 0 ? 0 : inter / union;
+function similar(a: TitleInfo, b: TitleInfo): boolean {
+  if (a.url === b.url && a.norm === b.norm) return true;
+  if (!(Math.abs(a.time - b.time) <= WINDOW_MS)) return false; // also false for NaN
+  let shared = 0;
+  a.tokens.forEach((w) => { if (b.tokens.has(w)) shared++; });
+  if (shared < 3) return false;
+  const jac = shared / (a.tokens.size + b.tokens.size - shared);
+  const short = Math.min(a.tokens.size, b.tokens.size) < 5;
+  if (jac < (short ? 0.7 : 0.5)) return false;
+  if (a.nums.size > 0 && b.nums.size > 0) {
+    let numShared = false;
+    a.nums.forEach((n) => { if (b.nums.has(n)) numShared = true; });
+    if (!numShared) return false;
+  }
+  return true;
 }
 
-// Same story = same 50-char normalized title prefix (cheap bucket) AND, as a guard against
-// distinct stories sharing a prefix (e.g. "Live: ..."), full-title word Jaccard >= 0.8.
-function isSameStory(a: ScoredArticle, b: ScoredArticle): boolean {
-  if (normalizeTitle(a.title).substring(0, 50) !== normalizeTitle(b.title).substring(0, 50)) return false;
-  return jaccard(wordSet(a.title), wordSet(b.title)) >= 0.8;
+/** Returns, for article i, the indices j != i that are the same story. Uses an inverted index. */
+function buildMatcher(articles: ScoredArticle[]): (i: number) => number[] {
+  const infos = articles.map(buildInfo);
+  const limit = Math.max(5, Math.ceil(articles.length * 0.2));
+  const index = new Map<string, number[]>();
+  const byUrl = new Map<string, number[]>();
+  infos.forEach((info, i) => {
+    info.tokens.forEach((t) => {
+      const l = index.get(t);
+      if (l) l.push(i); else index.set(t, [i]);
+    });
+    const u = byUrl.get(info.url);
+    if (u) u.push(i); else byUrl.set(info.url, [i]);
+  });
+  return (i) => {
+    const seen = new Set<number>();
+    const out: number[] = [];
+    const consider = (j: number) => {
+      if (j === i || seen.has(j)) return;
+      seen.add(j);
+      if (similar(infos[i], infos[j])) out.push(j);
+    };
+    infos[i].tokens.forEach((t) => {
+      const l = index.get(t)!;
+      if (l.length <= limit) l.forEach(consider);
+    });
+    (byUrl.get(infos[i].url) || []).forEach(consider);
+    return out;
+  };
+}
+
+function calculateFrequencyScore(i: number, articles: ScoredArticle[], matches: (i: number) => number[]): number {
+  const me = articles[i];
+  const otherSources = new Set<string>();
+  for (const j of matches(i)) {
+    const o = articles[j];
+    if (o.url === me.url || o.source === me.source) continue; // duplicates are not corroboration
+    otherSources.add(o.source);
+  }
+  return Math.min(otherSources.size / 5, 1);
 }
 
 export function deduplicateArticles(articles: ScoredArticle[]): ScoredArticle[] {
-  const groups: number[][] = [];
+  const matches = buildMatcher(articles);
+  const parent = articles.map((_, i) => i);
+  const find = (x: number): number => {
+    while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+    return x;
+  };
   for (let i = 0; i < articles.length; i++) {
-    const g = groups.find((idxs) => isSameStory(articles[idxs[0]], articles[i]));
-    if (g) g.push(i);
-    else groups.push([i]);
+    for (const j of matches(i)) {
+      const ri = find(i), rj = find(j);
+      if (ri !== rj) parent[Math.max(ri, rj)] = Math.min(ri, rj);
+    }
   }
+  const groupMap = new Map<number, number[]>();
+  for (let i = 0; i < articles.length; i++) {
+    const r = find(i);
+    const g = groupMap.get(r);
+    if (g) g.push(i); else groupMap.set(r, [i]);
+  }
+  const groups = Array.from(groupMap.values()); // Map keeps first-occurrence order
 
   return groups.map((idxs) => {
     // Highest score wins; ties go to the earliest in input.
@@ -158,19 +255,22 @@ export function deduplicateArticles(articles: ScoredArticle[]): ScoredArticle[] 
 }
 
 export function scoreArticles(articles: ScoredArticle[]): ScoredArticle[] {
-  return articles.map((article) => {
-    const sourceCred = SOURCE_CREDIBILITY[article.source] || 0.55;
+  const matches = buildMatcher(articles);
+  return articles.map((article, i) => {
+    const sourceCred = Object.hasOwn(SOURCE_CREDIBILITY, article.source)
+      ? SOURCE_CREDIBILITY[article.source]
+      : 0.55;
     const freshness = calculateFreshnessScore(article.publishedAt);
-    const frequency = calculateFrequencyScore(article, articles);
+    const frequency = calculateFrequencyScore(i, articles, matches);
     const topic = topicWeight(article.categories);
-    
+
     const score = (
       (sourceCred * 0.4) +
       (frequency * 0.3) +
       (freshness * 0.2) +
       (topic * 0.1)
     );
-    
+
     return {
       ...article,
       importanceScore: Math.round(score * 100) / 100,

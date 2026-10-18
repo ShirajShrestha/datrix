@@ -118,3 +118,86 @@ describe('scoreArticles', () => {
     expect(b.importanceScore).toBe(solo.importanceScore);
   });
 });
+
+describe('similarity-based dedupe', () => {
+  const at = (title: string, source: string, o: Partial<ScoredArticle> = {}) =>
+    mk({ title, source, url: `https://${source}.com/${encodeURIComponent(title)}`, sources: [{ name: source, url: `https://${source}.com/${encodeURIComponent(title)}` }], ...o });
+  const merges = (a: ScoredArticle, b: ScoredArticle) => deduplicateArticles([a, b]).length === 1;
+
+  it('merges headline variants across outlets', () => {
+    expect(merges(at('Trump announces new tariffs on Chinese imports', 'BBC'), at('Trump announces new tariffs on Chinese imports, markets fall', 'NYT'))).toBe(true);
+    expect(merges(at('Apple unveils iPhone 17 with new AI features', 'BBC'), at('Apple unveils iPhone 17 with new AI features - The Verge', 'The Verge'))).toBe(true);
+  });
+
+  it('does not merge the Fed pair (no alias table; documented limitation)', () => {
+    expect(merges(at('Fed holds interest rates steady as inflation cools', 'BBC'), at('Federal Reserve Leaves Rates Unchanged, Citing Cooling Inflation', 'NYT'))).toBe(false);
+  });
+
+  it('does not merge distinct Live: stories', () => {
+    expect(merges(at('Live: Trump trial day 3', 'BBC'), at('Live: Premier League matchday 10', 'NYT'))).toBe(false);
+  });
+
+  it('numeric guard blocks differing numbers', () => {
+    expect(merges(at('Man wins 5 million lottery', 'BBC'), at('Man wins 7 million lottery', 'NYT'))).toBe(false);
+  });
+
+  it('does not merge same wording 5 days apart', () => {
+    const old = new Date(Date.now() - 5 * 86400000);
+    expect(merges(at('Trump announces new tariffs on Chinese imports', 'BBC'), at('Trump announces new tariffs on Chinese imports', 'NYT', { publishedAt: old }))).toBe(false);
+  });
+
+  it('is order independent', () => {
+    const arts = [
+      at('Trump announces new tariffs on Chinese imports', 'BBC'),
+      at('Apple unveils iPhone 17 with new AI features', 'NYT'),
+      at('Trump announces new tariffs on Chinese imports, markets fall', 'CNN'),
+      at('Apple unveils iPhone 17 with new AI features - The Verge', 'The Verge'),
+      at('Live: Premier League matchday 10', 'ESPN'),
+    ];
+    const sig = (xs: ScoredArticle[]) => deduplicateArticles(xs).map((a) => a.sources.map((s) => s.name).sort().join('+')).sort();
+    expect(sig([...arts].reverse())).toEqual(sig(arts));
+    expect(sig([arts[3], arts[0], arts[4], arts[1], arts[2]])).toEqual(sig(arts));
+    expect(sig(arts)).toHaveLength(3);
+  });
+
+  it('transitive chain ends in one group', () => {
+    const out = deduplicateArticles([
+      at('alpha bravo charlie delta echo', 'BBC'),
+      at('bravo charlie delta echo foxtrot', 'NYT'),
+      at('charlie delta echo foxtrot golf', 'CNN'),
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].sources).toHaveLength(3);
+  });
+
+  it('frequency counts distinct other sources, not duplicates', () => {
+    const t = 'Trump announces new tariffs on Chinese imports';
+    const base = scoreArticles([at(t, 'BBC')])[0].importanceScore!;
+    const dupSameSource = scoreArticles([at(t, 'BBC'), at(t, 'BBC', { url: 'https://other.com/x' })])[0].importanceScore!;
+    const twoSources = scoreArticles([at(t, 'BBC'), at(t, 'NYT'), at(t, 'CNN')])[0].importanceScore!;
+    expect(dupSameSource).toBe(base);
+    expect(twoSources).toBeGreaterThan(base);
+  });
+
+  it('invalid publishedAt does not throw', () => {
+    const bad = at('Some story about nothing special', 'BBC', { publishedAt: new Date('nope') });
+    expect(() => scoreArticles([bad, { ...bad, source: 'NYT', url: 'z' }])).not.toThrow();
+    expect(() => deduplicateArticles([bad, { ...bad, url: 'z' }])).not.toThrow();
+  });
+
+  it('unknown source named like a prototype key gets default credibility', () => {
+    const [a] = scoreArticles([at('Constructor story here today', 'constructor')]);
+    expect(Number.isFinite(a.importanceScore)).toBe(true);
+  });
+
+  it('800 synthetic articles dedupe quickly', () => {
+    const arts: ScoredArticle[] = [];
+    for (let i = 0; i < 800; i++) {
+      arts.push(at(`Story${i} word${i % 37} thing${i % 11} topic${i % 7} extra${i}`, `S${i % 9}`, { url: `https://x.com/${i}` }));
+    }
+    const t0 = performance.now();
+    const out = deduplicateArticles(scoreArticles(arts));
+    expect(performance.now() - t0).toBeLessThan(500);
+    expect(out.length).toBe(800);
+  });
+});
