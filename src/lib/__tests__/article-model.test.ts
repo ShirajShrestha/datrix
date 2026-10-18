@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { Article } from '@/lib/models/Article';
 
 describe('Article schema', () => {
-  const indexes = Article.schema.indexes();
+  const indexes = Article.schema.indexes() as [Record<string, number>, Record<string, unknown>][];
   it('has categories array and no legacy fields', () => {
     expect(Article.schema.path('categories')).toBeDefined();
     expect(Article.schema.path('category')).toBeUndefined();
