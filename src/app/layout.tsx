@@ -1,10 +1,11 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Playfair_Display, DM_Sans, Inter, Lora } from "next/font/google";
 import "./globals.css";
 import Sidebar from "@/components/Sidebar";
 import MobileNav from "@/components/MobileNav";
 import Onboarding from "@/components/Onboarding";
 import MobileHeader from "@/components/MobileHeader";
+import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
 import { ThemeProvider } from "@/components/ThemeProvider";
 
 const inter = Inter({
@@ -34,6 +35,19 @@ const dmSans = DM_Sans({
 export const metadata: Metadata = {
   title: "Datrix - AI-Powered News Intelligence",
   description: "Stay informed with AI-powered news that matters.",
+  manifest: "/manifest.json",
+  icons: {
+    icon: [
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
+  appleWebApp: { capable: true, title: "Datrix", statusBarStyle: "black-translucent" },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0a0a0c",
 };
 
 export default function RootLayout({
@@ -53,6 +67,7 @@ export default function RootLayout({
             </main>
             <MobileNav />
             <Onboarding />
+            <ServiceWorkerRegister />
           </div>
         </ThemeProvider>
       </body>
