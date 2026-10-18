@@ -18,7 +18,7 @@ export default function ServiceWorkerRegister() {
       .register("/sw.js", { scope: "/" })
       .then((reg) => {
         const activateWaiting = () => {
-          if (reg.waiting && navigator.serviceWorker.controller) reg.waiting.postMessage({ type: "SKIP_WAITING" });
+          if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
         };
         activateWaiting();
         reg.addEventListener("updatefound", () => {

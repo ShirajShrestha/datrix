@@ -1,9 +1,9 @@
 /* Datrix service worker. Hand-written; committed as-is (not generated).
- * Sections: 1) config  2) helpers  3) lifecycle  4) fetch routing  5) push (Task 18 adds here)
+ * Sections: 1) config  2) pure helpers  3) cache handlers  4) lifecycle  5) fetch routing  6) push (Task 18)
  */
 
 // ---- 1. Config -------------------------------------------------------------
-const VERSION = 'v1';
+const VERSION = 'v2';
 const STATIC_CACHE = `datrix-static-${VERSION}`;
 const SHELL_CACHE = `datrix-shell-${VERSION}`;
 const IMAGE_CACHE = `datrix-images-${VERSION}`;
@@ -13,37 +13,81 @@ const ALL_CACHES = [STATIC_CACHE, SHELL_CACHE, IMAGE_CACHE, ARTICLES_CACHE];
 const ARTICLES_MAX_ENTRIES = 24;
 const ARTICLES_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const IMAGES_MAX_ENTRIES = 60;
-const SHELL_URLS = ['/', '/offline.html', '/manifest.json', '/icon-192.png'];
+const STATIC_MAX_ENTRIES = 120;
 const DATE_HEADER = 'x-sw-cached-at';
 
-// ---- 2. Helpers ------------------------------------------------------------
-async function trim(cacheName, maxEntries) {
-  const cache = await caches.open(cacheName);
-  const keys = await cache.keys();
-  for (let i = 0; i < keys.length - maxEntries; i++) await cache.delete(keys[i]);
+// Caches left behind by the previous next-pwa/Workbox worker served from this same /sw.js URL.
+const LEGACY_CACHE_NAMES = [
+  'start-url', 'pages', 'others', 'pages-rsc', 'pages-rsc-prefetch', 'next-static-js-assets',
+  'static-js-assets', 'static-style-assets', 'static-image-assets', 'static-font-assets',
+  'static-audio-assets', 'static-video-assets', 'next-image', 'apis', 'cross-origin',
+  'google-fonts-webfonts', 'google-fonts-stylesheets', 'static-data-assets', 'next-data',
+];
+
+// ---- 2. Pure helpers (unit-tested via self.__datrixSw) -----------------------
+// Returns 'articles' | 'static' | 'image' | 'navigate' | null (null = do not handle).
+function routeFor(request, origin) {
+  if (request.method !== 'GET') return null;
+  if (request.headers && request.headers.has('range')) return null;
+  const url = new URL(request.url);
+  if (url.origin !== origin) return null; // never touch cross-origin (incl. remote images)
+  const path = url.pathname;
+  if (path.startsWith('/api/cron/') || path.startsWith('/api/push/')) return null;
+  if (path === '/api/articles' || path.startsWith('/api/articles/')) return 'articles';
+  if (path.startsWith('/api/')) return null;
+  if (path.startsWith('/_next/static/')) return 'static';
+  if (request.destination === 'image' || /\.(png|jpe?g|svg|webp|avif|gif|ico)$/.test(path)) return 'image';
+  if (request.mode === 'navigate') return 'navigate';
+  return null;
 }
 
-// Store a copy stamped with the time it was cached (for max-age checks).
-async function putStamped(cache, request, response) {
-  const headers = new Headers(response.headers);
-  headers.set(DATE_HEADER, String(Date.now()));
-  const body = await response.blob();
-  await cache.put(request, new Response(body, { status: response.status, statusText: response.statusText, headers }));
+function isCacheable(res) {
+  if (!res || res.status !== 200 || res.type !== 'basic') return false;
+  const cc = (res.headers.get('Cache-Control') || '').toLowerCase();
+  if (cc.includes('no-store') || cc.includes('private')) return false;
+  if ((res.headers.get('Vary') || '').trim() === '*') return false;
+  return true;
+}
+
+function isLegacyCacheName(name) {
+  if (name.startsWith('datrix-')) return false;
+  return name.startsWith('workbox-') || LEGACY_CACHE_NAMES.includes(name);
 }
 
 function isFresh(response, maxAgeMs) {
   const at = Number(response.headers.get(DATE_HEADER));
-  return at && Date.now() - at < maxAgeMs;
+  return !!at && Date.now() - at < maxAgeMs;
 }
 
-async function cacheFirst(request, cacheName, maxEntries) {
+// ---- 3. Cache handlers -----------------------------------------------------
+async function trim(cacheName, maxEntries) {
+  try {
+    const cache = await caches.open(cacheName);
+    const keys = await cache.keys();
+    for (let i = 0; i < keys.length - maxEntries; i++) await cache.delete(keys[i]);
+  } catch {}
+}
+
+// Never throws: a cache failure must not break a good network response.
+async function safePut(cache, request, response, stamp) {
+  try {
+    if (!stamp) return await cache.put(request, response);
+    const headers = new Headers(response.headers);
+    headers.set(DATE_HEADER, String(Date.now()));
+    const body = await response.blob();
+    await cache.put(request, new Response(body, { status: response.status, statusText: response.statusText, headers }));
+  } catch {}
+}
+
+async function cacheFirst(event, cacheName, maxEntries) {
+  const request = event.request;
   const cache = await caches.open(cacheName);
   const hit = await cache.match(request);
   if (hit) return hit;
   const res = await fetch(request);
-  if (res.ok && res.type === 'basic') {
-    await cache.put(request, res.clone());
-    if (maxEntries) trim(cacheName, maxEntries);
+  if (isCacheable(res)) {
+    const copy = res.clone();
+    event.waitUntil(safePut(cache, request, copy).then(() => trim(cacheName, maxEntries)));
   }
   return res;
 }
@@ -53,12 +97,14 @@ async function staleWhileRevalidateArticles(event) {
   const cache = await caches.open(ARTICLES_CACHE);
   const cached = await cache.match(request);
   const usable = cached && isFresh(cached, ARTICLES_MAX_AGE_MS) ? cached : null;
-  if (cached && !usable) await cache.delete(request);
+  if (cached && !usable) {
+    try { await cache.delete(request); } catch {}
+  }
 
   const network = fetch(request)
     .then(async (res) => {
-      if (res.ok) {
-        await putStamped(cache, request, res.clone());
+      if (isCacheable(res)) {
+        await safePut(cache, request, res.clone(), true);
         await trim(ARTICLES_CACHE, ARTICLES_MAX_ENTRIES);
       }
       return res;
@@ -73,28 +119,41 @@ async function staleWhileRevalidateArticles(event) {
   return res || new Response(JSON.stringify({ error: 'offline' }), { status: 503, headers: { 'Content-Type': 'application/json' } });
 }
 
-async function navigationHandler(request) {
+// Network-first. Offline: exact cached hit -> cached '/' only for '/' itself -> /offline.html.
+// Never serves one route's HTML for another route.
+async function navigationHandler(event) {
+  const request = event.request;
+  const isHome = new URL(request.url).pathname === '/';
   try {
     const res = await fetch(request);
-    if (res.ok && new URL(request.url).pathname === '/') {
-      const cache = await caches.open(SHELL_CACHE);
-      cache.put('/', res.clone());
+    if (isHome && !res.redirected && isCacheable(res)) {
+      const copy = res.clone();
+      event.waitUntil(caches.open(SHELL_CACHE).then((c) => safePut(c, '/', copy)));
     }
     return res;
   } catch {
     const cache = await caches.open(SHELL_CACHE);
-    return (await cache.match(request)) || (await cache.match('/')) || (await cache.match('/offline.html')) || Response.error();
+    return (
+      (await cache.match(request)) ||
+      (isHome ? await cache.match('/') : undefined) ||
+      (await cache.match('/offline.html')) ||
+      Response.error()
+    );
   }
 }
 
-// ---- 3. Lifecycle ----------------------------------------------------------
-// A new worker waits until the page asks it to take over (see ServiceWorkerRegister),
-// so an open tab is never swapped mid-session unexpectedly.
+// ---- 4. Lifecycle ----------------------------------------------------------
+// A new worker waits until the page asks it to take over (see ServiceWorkerRegister).
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(SHELL_CACHE).then((cache) =>
-      Promise.all(SHELL_URLS.map((u) => cache.add(new Request(u, { cache: 'reload' })).catch(() => {})))
-    )
+    (async () => {
+      const cache = await caches.open(SHELL_CACHE);
+      try { await cache.add(new Request('/offline.html', { cache: 'reload' })); } catch {}
+      try {
+        const res = await fetch('/', { cache: 'reload' });
+        if (res.ok && !res.redirected) await cache.put('/', res);
+      } catch {}
+    })()
   );
 });
 
@@ -106,39 +165,26 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
       const names = await caches.keys();
-      await Promise.all(names.filter((n) => n.startsWith('datrix-') && !ALL_CACHES.includes(n)).map((n) => caches.delete(n)));
+      await Promise.all(
+        names
+          .filter((n) => (n.startsWith('datrix-') && !ALL_CACHES.includes(n)) || isLegacyCacheName(n))
+          .map((n) => caches.delete(n))
+      );
       await self.clients.claim();
     })()
   );
 });
 
-// ---- 4. Fetch routing ------------------------------------------------------
+// ---- 5. Fetch routing ------------------------------------------------------
 self.addEventListener('fetch', (event) => {
-  const { request } = event;
-  if (request.method !== 'GET') return;
-  const url = new URL(request.url);
-  if (url.origin !== self.location.origin) return; // never touch cross-origin (incl. remote images)
-
-  const path = url.pathname;
-  if (path.startsWith('/api/cron/') || path.startsWith('/api/push/')) return;
-
-  if (path === '/api/articles' || path.startsWith('/api/articles/')) {
-    event.respondWith(staleWhileRevalidateArticles(event));
-    return;
-  }
-  if (path.startsWith('/api/')) return;
-
-  if (path.startsWith('/_next/static/')) {
-    event.respondWith(cacheFirst(request, STATIC_CACHE));
-    return;
-  }
-  if (request.destination === 'image' || /\.(png|jpe?g|svg|webp|avif|gif|ico)$/.test(path)) {
-    event.respondWith(cacheFirst(request, IMAGE_CACHE, IMAGES_MAX_ENTRIES));
-    return;
-  }
-  if (request.mode === 'navigate') {
-    event.respondWith(navigationHandler(request));
-  }
+  const route = routeFor(event.request, self.location.origin);
+  if (route === 'articles') event.respondWith(staleWhileRevalidateArticles(event));
+  else if (route === 'static') event.respondWith(cacheFirst(event, STATIC_CACHE, STATIC_MAX_ENTRIES));
+  else if (route === 'image') event.respondWith(cacheFirst(event, IMAGE_CACHE, IMAGES_MAX_ENTRIES));
+  else if (route === 'navigate') event.respondWith(navigationHandler(event));
 });
 
-// ---- 5. Push (Task 18 adds 'push' and 'notificationclick' handlers here) ---
+// Test-only hook (harmless in production): exposes internals to src/lib/__tests__/sw.test.ts.
+self.__datrixSw = { routeFor, isCacheable, isLegacyCacheName, navigationHandler, staleWhileRevalidateArticles, cacheFirst, safePut, SHELL_CACHE, ARTICLES_CACHE };
+
+// ---- 6. Push (Task 18 adds 'push' and 'notificationclick' handlers here) ---
