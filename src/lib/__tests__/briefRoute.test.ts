@@ -1,9 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NextRequest } from 'next/server';
 
 const ID = 'a'.repeat(24);
 let store: Record<string, any>;
+let budget: Record<string, number>;
+let optsSeen: any[];
 const generateBrief = vi.fn();
 
 vi.mock('@/lib/db', () => ({ connectToDatabase: async () => {}, default: async () => {} }));
@@ -12,25 +14,40 @@ vi.mock('@/lib/models/Article', () => ({
   Article: {
     findById: (id: string) => ({ lean: async () => (store[id] ? structuredClone(store[id]) : null) }),
     // Emulates the atomic claim from the route's filter (synchronous check-and-set, like Mongo's doc-level atomicity).
-    findOneAndUpdate: (filter: any, update: any) => ({
+    findOneAndUpdate: (filter: any, update: any, opts: any) => ({
       lean: async () => {
+        optsSeen.push(opts);
         const d = store[filter._id];
         if (!d || d.brief?.whatHappened) return null;
         expect(filter['brief.whatHappened']).toEqual({ $exists: false });
-        const t = d.briefTriedAt as Date | undefined;
-        const limit = filter.$or[1].briefTriedAt.$lt as Date;
-        if (t && !(t < limit)) return null;
+        const limit = filter.$or[1].briefRetryAfter.$lte as Date;
+        if (d.briefRetryAfter && !(d.briefRetryAfter <= limit)) return null;
         const prev = structuredClone(d);
         d.briefTriedAt = update.$set.briefTriedAt;
+        d.briefRetryAfter = update.$set.briefRetryAfter;
+        d.briefAttempts = (d.briefAttempts ?? 0) + update.$inc.briefAttempts;
         return prev;
       },
     }),
-    updateOne: async (filter: any, update: any) => {
+    updateOne: async (filter: any, update: any, opts: any) => {
+      optsSeen.push(opts);
       Object.assign(store[filter._id], update.$set);
+      if (update.$inc) for (const k of Object.keys(update.$inc)) store[filter._id][k] = (store[filter._id][k] ?? 0) + update.$inc[k];
       return {};
     },
   },
 }));
+vi.mock('@/lib/models/BriefBudget', () => ({
+  BriefBudget: {
+    findOneAndUpdate: (filter: any) => ({
+      lean: async () => {
+        budget[filter._id] = (budget[filter._id] ?? 0) + 1;
+        return { _id: filter._id, count: budget[filter._id] };
+      },
+    }),
+  },
+}));
+
 
 import { POST } from '../../app/api/articles/[id]/brief/route';
 import { GET } from '../../app/api/articles/[id]/route';
@@ -49,6 +66,10 @@ const doc = (extra: object = {}) => ({
 
 beforeEach(() => {
   store = { [ID]: doc() };
+  budget = {};
+  optsSeen = [];
+  vi.useRealTimers();
+  delete process.env.BRIEF_MAX_PER_HOUR;
   generateBrief.mockReset();
 });
 
@@ -93,7 +114,7 @@ describe('brief route', () => {
     expect(store[ID].brief.generatedAt).toBeInstanceOf(Date);
     expect(generateBrief.mock.calls[0][2]).toEqual({ timeoutMs: 10000 });
   });
-  it('null generation stores only briefTriedAt and falls back', async () => {
+  it('null generation stores only attempt bookkeeping and falls back', async () => {
     generateBrief.mockResolvedValue(null);
     const j = await (await call()).json();
     expect(j).toEqual({ success: true, brief: null, fallback: true, text: 'desc text' });
@@ -110,6 +131,52 @@ describe('brief route', () => {
     generateBrief.mockResolvedValue(null);
     await call();
     expect(generateBrief.mock.calls[0][0]).toEqual({ title: 'T', snippets: [{ outlet: 'Src', text: 'desc text' }] });
+  });
+});
+
+describe('retry backoff, budget, timestamps, old-story fallback', () => {
+  const HOUR = 3600_000;
+  afterEach(() => vi.useRealTimers());
+  it('never touches updatedAt: every Article update passes timestamps:false', async () => {
+    generateBrief.mockResolvedValue({ whatHappened: 'w', provider: 'groq' });
+    await call();
+    expect(optsSeen.length).toBeGreaterThanOrEqual(3);
+    for (const o of optsSeen) expect(o).toMatchObject({ timestamps: false });
+    expect(store[ID]).not.toHaveProperty('updatedAt');
+  });
+  it('backs off 1 min, 1 h, 6 h, then 24 h', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    generateBrief.mockResolvedValue(null);
+    const waits = [60_000, HOUR, 6 * HOUR, 24 * HOUR, 24 * HOUR];
+    for (let n = 0; n < waits.length; n++) {
+      await call();
+      expect(generateBrief).toHaveBeenCalledTimes(n + 1);
+      expect(store[ID].briefAttempts).toBe(n + 1);
+      vi.setSystemTime(Date.now() + waits[n] - 1000);
+      await call(); // still inside the window: no new claim
+      expect(generateBrief).toHaveBeenCalledTimes(n + 1);
+      vi.setSystemTime(Date.now() + 1000);
+    }
+  });
+  it('enforces the hourly cap without calling the LLM and refunds the attempt', async () => {
+    process.env.BRIEF_MAX_PER_HOUR = '1';
+    generateBrief.mockResolvedValue(null);
+    await call();
+    expect(generateBrief).toHaveBeenCalledTimes(1);
+    const id2 = 'b'.repeat(24);
+    store[id2] = doc({ _id: id2 });
+    const j = await (await call(id2)).json();
+    expect(generateBrief).toHaveBeenCalledTimes(1);
+    expect(j).toMatchObject({ success: true, brief: null, fallback: true });
+    expect(store[id2].briefAttempts).toBe(0);
+  });
+  it('old docs without description/snippets fall back to the stored summary', async () => {
+    store[ID] = doc({ description: undefined, sources: [{ name: 'A', url: 'https://a' }], summary: { tldr: ' old tldr ', bullets: ['b1'] } });
+    generateBrief.mockResolvedValue(null);
+    expect((await (await call()).json()).text).toBe('old tldr');
+    store[ID] = doc({ description: undefined, sources: [{ name: 'A', url: 'https://a' }], summary: { tldr: '', bullets: ['b1', 'b2'] } });
+    expect((await (await call()).json()).text).toBe('b1 b2');
   });
 });
 

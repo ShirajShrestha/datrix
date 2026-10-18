@@ -35,7 +35,7 @@ function isHttpUrl(u: unknown): u is string {
 export function sanitizeArticleUrls<T extends { url: string; source: string; sources: { name: string; url: string; snippet?: string }[] }>(a: T): T | null {
   if (!isHttpUrl(a.url)) return null;
   const sources = (Array.isArray(a.sources) ? a.sources : []).filter((s) => s && isHttpUrl(s.url));
-  return { ...a, sources: sources.length ? sources : [{ name: a.source, url: a.url }] };
+  return { ...a, sources: sources.length ? sources : [{ name: a.source, url: a.url, ...(a.sources?.[0]?.snippet ? { snippet: a.sources[0].snippet } : {}) }] };
 }
 const SNIPPET_MAX = 600;
 

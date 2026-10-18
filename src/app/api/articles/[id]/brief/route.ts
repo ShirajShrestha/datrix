@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/db';
 import { Article } from '@/lib/models/Article';
+import { BriefBudget } from '@/lib/models/BriefBudget';
 import { generateBrief, type BriefInput } from '@/lib/services/brief';
 import { sameOrigin, jsonError } from '@/lib/pushRequest';
 
@@ -8,7 +9,15 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
 const ID_RE = /^[a-f\d]{24}$/i;
-const RETRY_AFTER_MS = 60_000;
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+/** Wait before the next attempt, given attempts made so far: 1 -> 1 min, 2 -> 1 h, 3 -> 6 h, 4+ -> 24 h. */
+const backoffMs = (attempts: number): number =>
+  attempts <= 0 ? 0 : attempts === 1 ? MINUTE : attempts === 2 ? HOUR : attempts === 3 ? 6 * HOUR : 24 * HOUR;
+const maxPerHour = (): number => {
+  const n = Number(process.env.BRIEF_MAX_PER_HOUR);
+  return Number.isFinite(n) && n >= 0 && process.env.BRIEF_MAX_PER_HOUR ? Math.floor(n) : 60;
+};
 const PROVIDER_TIMEOUT_MS = 10_000;
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -19,9 +28,12 @@ const publicBrief = (b: any) => ({
   provider: b.provider,
 });
 
+// The only place outlet snippet text can reach the browser (and only when the description is empty).
 const fallbackText = (doc: any): string => {
   const snip = (doc.sources ?? []).find((s: any) => s.snippet)?.snippet;
-  return doc.description || snip || '';
+  const tldr = typeof doc.summary?.tldr === 'string' ? doc.summary.tldr.trim() : '';
+  const bullets = Array.isArray(doc.summary?.bullets) ? doc.summary.bullets.filter((b: unknown) => typeof b === 'string').join(' ') : '';
+  return doc.description || snip || tldr || bullets || '';
 };
 
 function buildInput(doc: any): BriefInput {
@@ -47,15 +59,18 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ success: true, brief: publicBrief(doc.brief), cached: true, fallback: false });
     }
 
-    // Atomic claim: only one caller per 60s window may generate.
+    // Atomic claim: only one caller may generate until briefRetryAfter. A short lease is set here and
+    // widened to the attempt-based backoff right after. timestamps:false keeps Article.updatedAt
+    // (the push "recent ingest" signal) untouched.
     const now = new Date();
     const claimed: any = await Article.findOneAndUpdate(
       {
         _id: id,
         'brief.whatHappened': { $exists: false },
-        $or: [{ briefTriedAt: { $exists: false } }, { briefTriedAt: { $lt: new Date(now.getTime() - RETRY_AFTER_MS) } }],
+        $or: [{ briefRetryAfter: { $exists: false } }, { briefRetryAfter: { $lte: now } }],
       },
-      { $set: { briefTriedAt: now } },
+      { $set: { briefTriedAt: now, briefRetryAfter: new Date(now.getTime() + MINUTE) }, $inc: { briefAttempts: 1 } },
+      { timestamps: false },
     ).lean();
 
     if (!claimed) {
@@ -66,10 +81,30 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return fallback(fresh ?? doc);
     }
 
+    const attempts = (typeof claimed.briefAttempts === 'number' ? claimed.briefAttempts : 0) + 1;
+
+    // Global hourly budget (own collection, never Article).
+    const bucket = String(Math.floor(now.getTime() / HOUR));
+    const budget: any = await BriefBudget.findOneAndUpdate(
+      { _id: bucket },
+      { $inc: { count: 1 }, $setOnInsert: { expireAt: new Date((Number(bucket) + 2) * HOUR) } },
+      { upsert: true, new: true },
+    ).lean();
+    if ((budget?.count ?? 1) > maxPerHour()) {
+      // Over budget: refund the attempt and retry in the next hour bucket.
+      await Article.updateOne(
+        { _id: id },
+        { $inc: { briefAttempts: -1 }, $set: { briefRetryAfter: new Date((Number(bucket) + 1) * HOUR) } },
+        { timestamps: false },
+      );
+      return fallback(claimed);
+    }
+    await Article.updateOne({ _id: id }, { $set: { briefRetryAfter: new Date(now.getTime() + backoffMs(attempts)) } }, { timestamps: false });
+
     const brief = await generateBrief(buildInput(claimed), undefined, { timeoutMs: PROVIDER_TIMEOUT_MS });
     if (!brief) return fallback(claimed);
 
-    await Article.updateOne({ _id: id }, { $set: { brief: { ...brief, generatedAt: new Date() } } });
+    await Article.updateOne({ _id: id }, { $set: { brief: { ...brief, generatedAt: new Date() } } }, { timestamps: false });
     return NextResponse.json({ success: true, brief: publicBrief(brief), cached: false, fallback: false });
   } catch (error) {
     console.error('Brief failed:', error instanceof Error ? error.name : 'unknown');

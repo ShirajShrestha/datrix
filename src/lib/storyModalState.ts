@@ -51,6 +51,7 @@ export type BriefState =
 export type BriefAction =
   | { type: 'ready'; brief: BriefData }
   | { type: 'fallback'; text: string }
+  | { type: 'none' }
   | { type: 'error' };
 
 /** Initial state: stored brief shows immediately; legacy ids never fetch; otherwise loading. */
@@ -71,6 +72,8 @@ export function briefReducer(_state: BriefState, action: BriefAction): BriefStat
       return { status: 'ready', brief: action.brief };
     case 'fallback':
       return { status: 'fallback', text: action.text };
+    case 'none':
+      return { status: 'none' };
     default:
       return { status: 'error' };
   }
@@ -84,8 +87,9 @@ export function interpretBriefResponse(ok: boolean, json: unknown): BriefAction 
   if (b && typeof b === 'object' && typeof b.whatHappened === 'string' && b.whatHappened) {
     return { type: 'ready', brief: b };
   }
-  if (j.fallback === true && typeof j.text === 'string' && j.text.trim()) {
-    return { type: 'fallback', text: j.text };
+  if (j.fallback === true) {
+    // Empty fallback text is not an error: the modal shows the article's own description/tldr.
+    return typeof j.text === 'string' && j.text.trim() ? { type: 'fallback', text: j.text } : { type: 'none' };
   }
   return { type: 'error' };
 }

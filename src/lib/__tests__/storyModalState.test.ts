@@ -43,6 +43,8 @@ describe('brief state', () => {
   it('interprets responses', () => {
     expect(interpretBriefResponse(true, { success: true, brief: { whatHappened: 'w' } }).type).toBe('ready');
     expect(interpretBriefResponse(true, { success: true, brief: null, fallback: true, text: 'fb' })).toEqual({ type: 'fallback', text: 'fb' });
+    expect(interpretBriefResponse(true, { success: true, brief: null, fallback: true, text: '  ' })).toEqual({ type: 'none' });
+    expect(briefReducer({ status: 'loading' }, { type: 'none' })).toEqual({ status: 'none' });
     expect(interpretBriefResponse(false, { success: false }).type).toBe('error');
     expect(interpretBriefResponse(true, null).type).toBe('error');
     expect(interpretBriefResponse(true, { success: true, brief: null }).type).toBe('error');

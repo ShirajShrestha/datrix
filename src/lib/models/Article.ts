@@ -33,6 +33,8 @@ export interface IArticle extends Document {
   };
   brief?: StoredBrief;
   briefTriedAt?: Date;
+  briefAttempts?: number;
+  briefRetryAfter?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -82,6 +84,8 @@ const ArticleSchema = new Schema<IArticle>(
       generatedAt: { type: Date },
     },
     briefTriedAt: { type: Date },
+    briefAttempts: { type: Number },
+    briefRetryAfter: { type: Date },
   },
   {
     timestamps: true,

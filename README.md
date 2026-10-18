@@ -15,7 +15,7 @@ Datrix aggregates news from RSS feeds and news APIs, removes duplicate stories, 
 - Summaries (TL;DR, key points, why it matters): Groq first, then Gemini Flash, then an extractive fallback. Only articles without an LLM summary are sent to a provider.
 - Installable PWA: offline fallback page and the last loaded feed available offline.
 - Daily Web Push at a time you choose (default 08:00 in your own time zone).
-- Story modal: tap a card for a short brief, an image gallery and links to every outlet (see "Story modal and briefs").
+- Story modal: open a story (title or "Read more") for a short brief, an image gallery and links to every outlet (see "Story modal and briefs").
 - Search, daily digest, saved articles (local to the device), dark mode.
 
 ## Categories
@@ -160,11 +160,11 @@ Web Push on iPhone/iPad works only on iOS 16.4+ and only after Share -> Add to H
 
 ## Story modal and briefs
 
-Tapping a card (or "Read more") opens a story modal. The URL gets a `?story=<id>` parameter, so a story can be deep-linked, and closing the modal or pressing Back returns to the feed.
+Tapping a story's title or "Read more" opens a story modal. The URL gets a `?story=<id>` parameter, so a story can be deep-linked, and closing the modal or pressing Back returns to the feed.
 
 - **What is stored:** the ingest keeps, per article, a short `description` and a per-outlet `snippet` (each capped at 600 characters, HTML tags stripped) plus up to 5 image URLs. No full article bodies are stored or shown; the modal links out to each outlet.
-- **Briefs:** the modal shows "what happened / why it matters / background", generated from the stored snippets on first open by `POST /api/articles/<id>/brief` (Groq first, then Gemini, using the existing `GROQ_API_KEY` / `GEMINI_API_KEY`; no new variables) and cached on the article document. Output is validated (word limits, and any number must appear in the title or snippets the model saw). Cost is bounded to one successful provider call per article: later opens read the cache. A failed attempt is retried at most once a minute (atomic claim on `briefTriedAt`), and while no brief exists the modal falls back to the stored description.
-- **Endpoints:** `GET /api/articles/<id>` returns one article without snippets (`Cache-Control: public, s-maxage=60, stale-while-revalidate=120`). The brief `POST` requires a same-origin `Origin` header.
+- **Briefs:** the modal shows "what happened / why it matters / background", generated from the stored snippets on first open by `POST /api/articles/<id>/brief` (Groq first, then Gemini, using the existing `GROQ_API_KEY` / `GEMINI_API_KEY`; no new variables) and cached on the article document. Output is validated (word limits, and any number must appear in the title or snippets the model saw). Cost is bounded to one successful provider call per article: later opens read the cache. Failed generations (provider error, missing keys, too little text) are retried with backoff, not forever: 1 minute after the first failure, then 1 hour, 6 hours and 24 hours (attempt count and `briefRetryAfter` are claimed atomically). A global cap of `BRIEF_MAX_PER_HOUR` claims per hour (default 60) bounds total provider calls; over the cap, the modal falls back without calling a provider. The brief routes never change an article's `updatedAt`. While no brief exists the modal shows the stored description, or the existing short summary for stories ingested before this feature.
+- **Endpoints:** `GET /api/articles/<id>` returns one article without snippets (`Cache-Control: public, s-maxage=60, stale-while-revalidate=120`). The brief `POST` requires a same-origin `Origin` header. Clustered stories list at most 8 outlets, so the "N sources" chip tops out at 8.
 - **Saved articles:** the modal's save button uses the same on-device saved list as the cards.
 - **Known limits:** the first open of an uncached story takes about 1-3 s. Stories ingested before this change get snippets and images on the next daily ingest; until then their brief falls back to the single stored description. The production build (`npm run build`) was not re-run as part of this docs/fix task because the dev server shares `.next`; tests, type check and lint were run.
 
