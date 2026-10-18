@@ -1,4 +1,5 @@
 import webpush from 'web-push';
+import { normalizeSlug, type CategorySlug } from '@/lib/categories';
 
 export const PUSH_WINDOW_MINUTES = 180;
 
@@ -135,4 +136,67 @@ export async function sendToSub(
     console.warn(`Push send failed: ${tag}`);
     return 'error';
   }
+}
+
+const ALLOWED_EXACT_HOSTS = ['fcm.googleapis.com', 'updates.push.services.mozilla.com', 'web.push.apple.com'];
+const ALLOWED_HOST_SUFFIXES = ['.push.services.mozilla.com', '.push.apple.com', '.notify.windows.com', '.push.microsoft.com'];
+const MAX_ENDPOINT_LEN = 1000;
+const MAX_KEY_LEN = 200;
+const KEY_RE = /^[A-Za-z0-9_\-=]+$/;
+
+/** True only for https URLs on a known push-service host (no userinfo, no custom port). */
+export function isAllowedPushEndpoint(url: string): boolean {
+  if (typeof url !== 'string' || url.length === 0 || url.length > MAX_ENDPOINT_LEN) return false;
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== 'https:') return false;
+  if (u.username || u.password || u.port) return false;
+  const host = u.hostname.toLowerCase();
+  if (!host || host.startsWith('[')) return false;
+  return ALLOWED_EXACT_HOSTS.includes(host) || ALLOWED_HOST_SUFFIXES.some((suf) => host.endsWith(suf));
+}
+
+export type SubscribeValue = {
+  subscription: { endpoint: string; keys: { p256dh: string; auth: string } };
+  categories: CategorySlug[];
+  time: string;
+  timeZone: string;
+};
+
+const isKey = (v: unknown): v is string =>
+  typeof v === 'string' && v.length > 0 && v.length <= MAX_KEY_LEN && KEY_RE.test(v);
+
+export function validateSubscribeBody(
+  body: unknown,
+): { ok: true; value: SubscribeValue } | { ok: false; error: string } {
+  const fail = (error: string) => ({ ok: false as const, error });
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return fail('Invalid body');
+  const b = body as Record<string, unknown>;
+  const sub = b.subscription;
+  if (!sub || typeof sub !== 'object' || Array.isArray(sub)) return fail('Invalid subscription');
+  const { endpoint, keys } = sub as Record<string, unknown>;
+  if (typeof endpoint !== 'string' || !isAllowedPushEndpoint(endpoint)) return fail('Invalid endpoint');
+  if (!keys || typeof keys !== 'object' || Array.isArray(keys)) return fail('Invalid keys');
+  const { p256dh, auth } = keys as Record<string, unknown>;
+  if (!isKey(p256dh) || !isKey(auth)) return fail('Invalid keys');
+  const rawCats = b.categories ?? [];
+  if (!Array.isArray(rawCats) || rawCats.length > 14) return fail('Invalid categories');
+  const categories: CategorySlug[] = [];
+  for (const c of rawCats) {
+    if (typeof c !== 'string') return fail('Invalid categories');
+    const slug = normalizeSlug(c);
+    if (slug && !categories.includes(slug)) categories.push(slug);
+  }
+  if (typeof b.time !== 'string' || !TIME_RE.test(b.time)) return fail('Invalid time');
+  if (typeof b.timeZone !== 'string' || b.timeZone.length > 100 || !localParts(new Date(), b.timeZone)) {
+    return fail('Invalid timeZone');
+  }
+  return {
+    ok: true,
+    value: { subscription: { endpoint, keys: { p256dh, auth } }, categories, time: b.time, timeZone: b.timeZone },
+  };
 }

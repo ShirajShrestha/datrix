@@ -171,3 +171,83 @@ describe('PushSub schema', () => {
     expect(new PushSub({ ...valid(), categories: ['nope'] }).validateSync()?.errors.categories).toBeDefined();
   });
 });
+
+import { isAllowedPushEndpoint, validateSubscribeBody } from '@/lib/services/push';
+
+describe('isAllowedPushEndpoint', () => {
+  it.each([
+    'https://fcm.googleapis.com/fcm/send/abc',
+    'https://updates.push.services.mozilla.com/wpush/v2/abc',
+    'https://web.push.apple.com/abc',
+    'https://abc.push.apple.com/x',
+    'https://wns2-par02p.notify.windows.com/?token=x',
+    'https://foo.push.microsoft.com/x',
+    'https://FCM.GoogleAPIs.com/fcm/send/abc',
+    'HTTPS://Web.Push.Apple.COM/abc',
+  ])('allows %s', (u) => expect(isAllowedPushEndpoint(u)).toBe(true));
+  it.each([
+    'http://fcm.googleapis.com/x',
+    'https://fcm.googleapis.com.evil.com/x',
+    'https://evil.com/fcm.googleapis.com',
+    'https://user:pw@fcm.googleapis.com/x',
+    'https://fcm.googleapis.com@evil.com/x',
+    'https://127.0.0.1/x',
+    'https://[::1]/x',
+    'https://169.254.169.254/x',
+    'https://localhost',
+    'https://fcm.googleapis.com:8443/x',
+    'https://evilpush.apple.com.evil.com/x',
+    'https://notpush.apple.com/x',
+    'garbage',
+    '',
+    'https://fcm.googleapis.com/' + 'a'.repeat(1000),
+  ])('rejects %s', (u) => expect(isAllowedPushEndpoint(u)).toBe(false));
+  it('rejects non-strings', () => expect(isAllowedPushEndpoint(5 as unknown as string)).toBe(false));
+});
+
+describe('validateSubscribeBody', () => {
+  const good = () => ({
+    subscription: { endpoint: 'https://fcm.googleapis.com/fcm/send/x', keys: { p256dh: 'BNc_-abc=', auth: 'abc_-123' } },
+    categories: ['ai', 'tech', 'bogus', 'ai'],
+    time: '08:00',
+    timeZone: 'Asia/Kathmandu',
+  });
+  it('accepts valid body, normalizes categories', () => {
+    const r = validateSubscribeBody(good());
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.categories).toEqual(['ai', 'technology']);
+  });
+  it('allows empty categories', () => {
+    const r = validateSubscribeBody({ ...good(), categories: [] });
+    expect(r.ok && r.value.categories).toEqual([]);
+  });
+  it('rejects http endpoint', () => {
+    const b = good(); b.subscription.endpoint = 'http://fcm.googleapis.com/x';
+    expect(validateSubscribeBody(b).ok).toBe(false);
+  });
+  it('rejects evil host', () => {
+    const b = good(); b.subscription.endpoint = 'https://evil.com/x';
+    expect(validateSubscribeBody(b).ok).toBe(false);
+  });
+  it('rejects bad time', () => {
+    expect(validateSubscribeBody({ ...good(), time: '25:00' }).ok).toBe(false);
+    expect(validateSubscribeBody({ ...good(), time: '8:00' }).ok).toBe(false);
+  });
+  it('rejects invalid timeZone', () => {
+    expect(validateSubscribeBody({ ...good(), timeZone: 'Mars/Base' }).ok).toBe(false);
+  });
+  it('rejects bad keys', () => {
+    const b = good(); b.subscription.keys.auth = 'a b!';
+    expect(validateSubscribeBody(b).ok).toBe(false);
+    const c = good(); c.subscription.keys.p256dh = 'a'.repeat(201);
+    expect(validateSubscribeBody(c).ok).toBe(false);
+  });
+  it('rejects too many / non-string categories', () => {
+    expect(validateSubscribeBody({ ...good(), categories: Array(15).fill('ai') }).ok).toBe(false);
+    expect(validateSubscribeBody({ ...good(), categories: [1] }).ok).toBe(false);
+    expect(validateSubscribeBody({ ...good(), categories: 'ai' }).ok).toBe(false);
+  });
+  it('rejects non-objects', () => {
+    for (const v of [null, undefined, 'x', 5, [], { subscription: 'x' }]) expect(validateSubscribeBody(v).ok).toBe(false);
+  });
+});

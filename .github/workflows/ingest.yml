@@ -10,6 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Call news ingest endpoint
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          curl --fail --silent --show-error -X GET "${{ secrets.APP_URL }}/api/cron/news" \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+          curl --fail --silent --show-error -X GET "$APP_URL/api/cron/news" \
+            -H "Authorization: Bearer $CRON_SECRET"
