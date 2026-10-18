@@ -11,6 +11,8 @@ export interface ScoredArticle {
   publishedAt: Date;
   description?: string;
   imageUrl?: string;
+  /** Gallery images: canonical's first, deduped, http(s) only, max MAX_IMAGES. */
+  images?: string[];
   sources: SourceRef[];
   importanceScore?: number;
 }
@@ -206,6 +208,21 @@ function calculateFrequencyScore(i: number, articles: ScoredArticle[], matches: 
   return Math.min(otherSources.size / 5, 1);
 }
 
+export const MAX_IMAGES = 5;
+export const MAX_SOURCES = 8;
+
+/** Union image lists in order: dedupe by URL, http(s) only, capped at MAX_IMAGES. */
+export function unionImages(...lists: (string[] | undefined)[]): string[] {
+  const out: string[] = [];
+  for (const list of lists) {
+    for (const u of list ?? []) {
+      if (out.length >= MAX_IMAGES) return out;
+      if (typeof u === 'string' && /^https?:\/\//i.test(u) && !out.includes(u)) out.push(u);
+    }
+  }
+  return out;
+}
+
 export function deduplicateArticles(articles: ScoredArticle[]): ScoredArticle[] {
   const matches = buildMatcher(articles);
   const parent = articles.map((_, i) => i);
@@ -235,7 +252,12 @@ export function deduplicateArticles(articles: ScoredArticle[]): ScoredArticle[] 
     }
     const canonical = articles[best];
     if (idxs.length === 1) {
-      return { ...canonical, categories: [...canonical.categories], sources: [...canonical.sources] };
+      return {
+        ...canonical,
+        categories: [...canonical.categories],
+        sources: [...canonical.sources],
+        ...(canonical.images ? { images: unionImages(canonical.images) } : {}),
+      };
     }
     const ordered = [best, ...idxs.filter((i) => i !== best)].map((i) => articles[i]);
 
@@ -250,7 +272,13 @@ export function deduplicateArticles(articles: ScoredArticle[]): ScoredArticle[] 
       }
       if (!imageUrl && a.imageUrl) imageUrl = a.imageUrl;
     }
-    return { ...canonical, categories, sources, imageUrl };
+    return {
+      ...canonical,
+      categories,
+      sources: sources.slice(0, MAX_SOURCES),
+      imageUrl,
+      images: unionImages(...ordered.map((a) => a.images)),
+    };
   });
 }
 

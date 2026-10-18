@@ -1,6 +1,6 @@
 import { normalizeSlug, tagCategories, type CategorySlug } from '@/lib/categories';
 import { fetchAllSources } from '@/lib/sources';
-import { scoreArticles, deduplicateArticles, type ScoredArticle } from '@/lib/services/scoring';
+import { scoreArticles, deduplicateArticles, unionImages, MAX_SOURCES, type ScoredArticle } from '@/lib/services/scoring';
 import { resolveImages } from '@/lib/services/images';
 import { connectToDatabase } from '@/lib/db';
 import { summarizeBatch } from '@/lib/services/summarizer';
@@ -32,11 +32,23 @@ function isHttpUrl(u: unknown): u is string {
  * Drops articles whose own url is not http(s), and `sources[]` entries with non-http(s) urls.
  * An article left with no valid source gets one built from its own name/url.
  */
-export function sanitizeArticleUrls<T extends { url: string; source: string; sources: { name: string; url: string }[] }>(a: T): T | null {
+export function sanitizeArticleUrls<T extends { url: string; source: string; sources: { name: string; url: string; snippet?: string }[] }>(a: T): T | null {
   if (!isHttpUrl(a.url)) return null;
   const sources = (Array.isArray(a.sources) ? a.sources : []).filter((s) => s && isHttpUrl(s.url));
   return { ...a, sources: sources.length ? sources : [{ name: a.source, url: a.url }] };
 }
+const SNIPPET_MAX = 600;
+
+/** Trim, collapse whitespace, cap at 600 chars on a word boundary; undefined when empty. */
+export function clampSnippet(s?: string): string | undefined {
+  const t = typeof s === 'string' ? s.replace(/\s+/g, ' ').trim() : '';
+  if (!t) return undefined;
+  if (t.length <= SNIPPET_MAX) return t;
+  const cut = t.slice(0, SNIPPET_MAX);
+  const sp = cut.lastIndexOf(' ');
+  return sp > 0 ? cut.slice(0, sp) : cut;
+}
+
 const IMAGE_MIN_REMAINING_MS = 12_000;
 const WRITE_RESERVE_MS = 8_000;
 const SUMMARY_WRITE_RESERVE_MS = 6_000;
@@ -50,7 +62,7 @@ export function planImageBudget(
   return { run: true, max: Math.min(60, Math.floor(remaining / 1000)), raceMs: remaining - WRITE_RESERVE_MS };
 }
 
-/** Merge items sharing a url: keep highest importanceScore, union categories/sources, first non-empty imageUrl. */
+/** Merge items sharing a url: keep highest importanceScore, union categories/sources, first non-empty imageUrl, unioned images. */
 export function mergeByUrl<T extends ScoredArticle>(items: T[]): T[] {
   const map = new Map<string, T>();
   for (const it of items) {
@@ -66,8 +78,9 @@ export function mergeByUrl<T extends ScoredArticle>(items: T[]): T[] {
     map.set(it.url, {
       ...best,
       categories: [...new Set([...best.categories, ...other.categories])],
-      sources,
+      sources: sources.slice(0, MAX_SOURCES),
       imageUrl: best.imageUrl || other.imageUrl,
+      images: unionImages(best.images, other.images),
     });
   }
   return [...map.values()];
@@ -91,6 +104,9 @@ export function buildOps(
       updatedAt: now,
     };
     if (a.imageUrl) $set.imageUrl = a.imageUrl;
+    if (a.description) $set.description = a.description;
+    if (a.images?.length) $set.images = a.images;
+    // brief/briefTriedAt are owned by the brief generator; never touched here.
     const summary = summaries.get(a.url);
     // Overwrite extractive/missing summaries, but never replace a stored LLM summary.
     if (summary && !llmSummaryUrls.has(a.url)) $set.summary = summary;
@@ -221,7 +237,8 @@ export async function runIngest(opts: { clock?: () => number } = {}): Promise<In
   const built: ScoredArticle[] = raw.map((r) => ({
     ...r,
     categories: tagCategories(r.category, r.title, r.description),
-    sources: [{ name: r.source, url: r.url }],
+    sources: [{ name: r.source, url: r.url, snippet: clampSnippet(r.description) }],
+    images: r.imageUrl ? [r.imageUrl] : [],
   }));
   const deduped = deduplicateArticles(scoreArticles(built));
   const pool = selectPool(deduped, POOL_PER_CATEGORY);
@@ -248,7 +265,8 @@ export async function runIngest(opts: { clock?: () => number } = {}): Promise<In
     }
     const categories = cleanCategories(a.categories);
     if (categories.length === 0) continue;
-    const candidate = { ...a, categories };
+    // Resolved imageUrl (images.ts) leads the gallery.
+    const candidate = { ...a, categories, images: unionImages([a.imageUrl ?? ''], a.images) };
     const err = new Article({
       title: candidate.title,
       url: candidate.url,
@@ -258,6 +276,8 @@ export async function runIngest(opts: { clock?: () => number } = {}): Promise<In
       publishedAt: candidate.publishedAt,
       importanceScore: candidate.importanceScore ?? 0,
       ...(candidate.imageUrl ? { imageUrl: candidate.imageUrl } : {}),
+      ...(candidate.description ? { description: candidate.description } : {}),
+      images: candidate.images,
     }).validateSync();
     if (err) {
       failures.push(`invalid:${hostOf(a.url)}`);

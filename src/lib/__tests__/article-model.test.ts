@@ -44,4 +44,16 @@ describe('Article schema', () => {
     const bad = new Article({ ...valid(), summary: { tldr: 't', bullets: [], provider: 'openai' } });
     expect(bad.validateSync()?.errors['summary.provider']).toBeDefined();
   });
+  it('stores description, images, source snippets and brief; sources are not capped by the schema', () => {
+    const sources = Array.from({ length: 9 }, (_, i) => ({ name: `s${i}`, url: `https://s${i}.test/a`, snippet: 'x' }));
+    const a = new Article({
+      ...valid(), description: 'd', images: ['https://i/1.jpg'], sources,
+      brief: { whatHappened: 'w', provider: 'groq', generatedAt: new Date() }, briefTriedAt: new Date(),
+    });
+    expect(a.validateSync()).toBeUndefined();
+    expect(a.sources).toHaveLength(9);
+    expect(a.sources[8].snippet).toBe('x');
+    const bad = new Article({ ...valid(), brief: { whatHappened: 'w', provider: 'openai' } });
+    expect(bad.validateSync()?.errors['brief.provider']).toBeDefined();
+  });
 });

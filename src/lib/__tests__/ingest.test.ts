@@ -70,7 +70,7 @@ describe('computeExpireAt', () => {
   });
 });
 
-import { planImageBudget, mergeByUrl, buildOps, selectNeedSummary, sanitizeArticleUrls, planFetchDeadline, INGEST_BUDGET_MS } from '../services/ingest';
+import { planImageBudget, mergeByUrl, buildOps, selectNeedSummary, sanitizeArticleUrls, clampSnippet, planFetchDeadline, INGEST_BUDGET_MS } from '../services/ingest';
 import { Article } from '../models/Article';
 
 describe('planImageBudget', () => {
@@ -211,3 +211,45 @@ describe('more edge cases', () => {
     expect(def.call(null)).toBeInstanceOf(Date);
   });
 });
+
+describe('snippets and images', () => {
+  const now = new Date('2026-01-01T00:00:00Z');
+  it('buildOps sets description/images/sources with snippets and never brief', () => {
+    const a = { ...mk('u1', 0.8, ['ai']), description: 'desc', images: ['https://i/1.jpg'], sources: [{ name: 'A', url: 'https://a/x', snippet: 'snip' }] };
+    const [op] = buildOps([a], new Map(), new Set(), now);
+    const set = op.updateOne.update.$set as Record<string, unknown>;
+    expect(set.description).toBe('desc');
+    expect(set.images).toEqual(['https://i/1.jpg']);
+    expect(set.sources).toEqual([{ name: 'A', url: 'https://a/x', snippet: 'snip' }]);
+    expect(set).not.toHaveProperty('brief');
+    expect(set).not.toHaveProperty('briefTriedAt');
+  });
+  it('buildOps skips empty images and empty description', () => {
+    const a = { ...mk('u1', 0.8, ['ai']), description: '', images: [] };
+    const [op] = buildOps([a], new Map(), new Set(), now);
+    const set = op.updateOne.update.$set as Record<string, unknown>;
+    expect(set).not.toHaveProperty('images');
+    expect(set).not.toHaveProperty('description');
+  });
+  it('mergeByUrl unions images (deduped, max 5) and keeps snippets', () => {
+    const a = { ...mk('u', 0.9, ['ai']), images: ['https://i/1', 'https://i/2', 'https://i/3'], sources: [{ name: 'A', url: 'u', snippet: 'sa' }] };
+    const b = { ...mk('u', 0.5, ['ai']), images: ['https://i/2', 'https://i/4', 'https://i/5', 'https://i/6'], sources: [{ name: 'B', url: 'u', snippet: 'sb' }] };
+    const out = mergeByUrl([a, b]);
+    expect(out[0].images).toEqual(['https://i/1', 'https://i/2', 'https://i/3', 'https://i/4', 'https://i/5']);
+    expect(out[0].sources.map((s) => s.snippet)).toEqual(['sa', 'sb']);
+  });
+  it('sanitizeArticleUrls keeps snippet on retained sources', () => {
+    const out = sanitizeArticleUrls({ title: 't', source: 'BBC', url: 'https://x.com/a', sources: [{ name: 'B', url: 'http://b.com/x', snippet: 'keep' }] });
+    expect(out?.sources).toEqual([{ name: 'B', url: 'http://b.com/x', snippet: 'keep' }]);
+  });
+  it('clampSnippet trims, collapses whitespace, caps at 600 on a word boundary', () => {
+    expect(clampSnippet(undefined)).toBeUndefined();
+    expect(clampSnippet('  \n ')).toBeUndefined();
+    expect(clampSnippet('  a   b\n c ')).toBe('a b c');
+    const long = clampSnippet('word '.repeat(300))!;
+    expect(long.length).toBeLessThanOrEqual(600);
+    expect(long.endsWith('word')).toBe(true);
+    expect(clampSnippet('x'.repeat(700))!.length).toBe(600);
+  });
+});
+

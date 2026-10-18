@@ -1,6 +1,6 @@
 import type { CategorySlug } from '@/lib/categories';
 
-export interface SourceRef { name: string; url: string }
+export interface SourceRef { name: string; url: string; snippet?: string }
 
 export interface RawArticle {
   title: string;

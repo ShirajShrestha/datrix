@@ -4,13 +4,23 @@ import { CATEGORIES, type CategorySlug } from '@/lib/categories';
 const SLUGS = new Set<string>(CATEGORIES.map((c) => c.slug));
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+export interface StoredBrief {
+  whatHappened: string;
+  whyItMatters?: string;
+  background?: string;
+  provider: 'groq' | 'gemini';
+  generatedAt: Date;
+}
+
 export interface IArticle extends Document {
   title: string;
   url: string;
   source: string;
   categories: CategorySlug[];
   imageUrl?: string;
-  sources: { name: string; url: string }[];
+  description?: string;
+  images?: string[];
+  sources: { name: string; url: string; snippet?: string }[];
   publishedAt: Date;
   expireAt?: Date;
   importanceScore: number;
@@ -21,6 +31,8 @@ export interface IArticle extends Document {
     whyItMatters?: string;
     provider?: 'groq' | 'gemini' | 'extractive';
   };
+  brief?: StoredBrief;
+  briefTriedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -39,7 +51,9 @@ const ArticleSchema = new Schema<IArticle>(
       },
     },
     imageUrl: { type: String },
-    sources: [{ _id: false, name: { type: String, required: true }, url: { type: String, required: true } }],
+    description: { type: String },
+    images: [{ type: String }],
+    sources: [{ _id: false, name: { type: String, required: true }, url: { type: String, required: true }, snippet: { type: String } }],
     publishedAt: { type: Date, required: true },
     // TTL field. Default only applies to new Article() docs; bulk upserts (bulkWrite/updateOne
     // with upsert) bypass schema defaults, so ingest sets expireAt explicitly on every upsert, with `setDefaultsOnInsert:false` on the ops and
@@ -60,6 +74,14 @@ const ArticleSchema = new Schema<IArticle>(
       whyItMatters: { type: String },
       provider: { type: String, enum: ['groq', 'gemini', 'extractive'] },
     },
+    brief: {
+      whatHappened: { type: String },
+      whyItMatters: { type: String },
+      background: { type: String },
+      provider: { type: String, enum: ['groq', 'gemini'] },
+      generatedAt: { type: Date },
+    },
+    briefTriedAt: { type: Date },
   },
   {
     timestamps: true,

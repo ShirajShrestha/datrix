@@ -201,3 +201,27 @@ describe('similarity-based dedupe', () => {
     expect(out.length).toBe(800);
   });
 });
+
+describe('deduplicateArticles snippets and images', () => {
+  const ref = (name: string, snippet: string) => ({ name, url: `https://${name}/x`, snippet });
+  it('unions images canonical-first and keeps per-outlet snippets and canonical description', () => {
+    const out = deduplicateArticles([
+      mk({ source: 'A', url: 'https://a/x', imageUrl: 'https://a/1.jpg', images: ['https://a/1.jpg'], description: 'desc A', sources: [ref('a', 'snippet A')], importanceScore: 0.9 }),
+      mk({ source: 'B', url: 'https://b/x', imageUrl: 'https://b/2.jpg', images: ['https://b/2.jpg', 'https://a/1.jpg', 'ftp://bad/3.jpg'], description: 'desc B', sources: [ref('b', 'snippet B')], importanceScore: 0.5 }),
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].images).toEqual(['https://a/1.jpg', 'https://b/2.jpg']);
+    expect(out[0].sources.map((s) => s.snippet)).toEqual(['snippet A', 'snippet B']);
+    expect(out[0].description).toBe('desc A');
+  });
+  it('caps images at 5 and sources at 8', () => {
+    const items = Array.from({ length: 5 }, (_, i) =>
+      mk({ source: `S${i}`, url: `https://s${i}/x`, images: [`https://s${i}/1.jpg`, `https://s${i}/2.jpg`], sources: [ref(`s${i}`, `n${i}`), ref(`t${i}`, `m${i}`)], importanceScore: 1 - i / 100 }));
+    const out = deduplicateArticles(items);
+    expect(out).toHaveLength(1);
+    expect(out[0].images).toHaveLength(5);
+    expect(out[0].sources).toHaveLength(8);
+    expect(out[0].sources[0].name).toBe('s0');
+  });
+});
+
