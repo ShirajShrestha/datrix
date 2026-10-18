@@ -68,7 +68,7 @@ export const CATEGORIES: CategoryDef[] = [
     color: 'var(--cat-world)', weight: 1.0,
     feeds: [BBC('news/world'), NYT('World'), G('world')],
     guardianSections: ['world'], gnewsTopic: 'world', mediastackCategory: 'general',
-    keywords: ['international', 'global', 'united nations', 'earthquake', 'refugee'],
+    keywords: ['international', 'united nations', 'earthquake', 'refugee'],
   },
   {
     slug: 'geopolitics', label: 'Geopolitics', emoji: '🌐',
@@ -88,7 +88,7 @@ export const CATEGORIES: CategoryDef[] = [
     color: 'var(--cat-politics)', weight: 1.0,
     feeds: [BBC('news/politics'), NYT('Politics'), NPR(1014), G('politics')],
     guardianSections: ['politics', 'us-news'],
-    keywords: ['election', 'parliament', 'congress', 'senate', 'president', 'prime minister', 'legislation', 'lawmakers', 'vote', 'government', 'policy', 'campaign'],
+    keywords: ['election', 'parliament', 'congress', 'senate', 'president', 'prime minister', 'legislation', 'lawmakers', 'vote', 'campaign'],
   },
   {
     slug: 'law', label: 'Law & Justice', emoji: '⚖️',
@@ -96,7 +96,7 @@ export const CATEGORIES: CategoryDef[] = [
     color: 'var(--cat-law)', weight: 0.9,
     feeds: [G('law')],
     guardianSections: ['law'],
-    keywords: ['court', 'judge', 'supreme court', 'ruling', 'lawsuit', 'verdict', 'trial', 'human rights', 'prosecutor', 'sentenced', 'legal'],
+    keywords: ['court', 'judge', 'supreme court', 'ruling', 'lawsuit', 'verdict', 'trial', 'human rights', 'prosecutor', 'sentenced'],
   },
   {
     slug: 'science', label: 'Science', emoji: '🔬',
@@ -108,7 +108,7 @@ export const CATEGORIES: CategoryDef[] = [
       NPR(1007), G('science'),
     ],
     guardianSections: ['science'], gnewsTopic: 'science', mediastackCategory: 'science',
-    keywords: ['scientist', 'research', 'study finds', 'nasa', 'space', 'astronomy', 'physics', 'biology', 'telescope', 'discovery', 'fossil'],
+    keywords: ['scientist', 'study finds', 'nasa', 'space', 'astronomy', 'physics', 'biology', 'telescope', 'discovery', 'fossil'],
   },
   {
     slug: 'health', label: 'Health', emoji: '🏥',
@@ -124,7 +124,7 @@ export const CATEGORIES: CategoryDef[] = [
     color: 'var(--cat-environment)', weight: 1.0,
     feeds: [NYT('Climate'), G('environment'), G('environment/climate-crisis')],
     guardianSections: ['environment'],
-    keywords: ['climate', 'emissions', 'carbon', 'global warming', 'renewable', 'biodiversity', 'wildfire', 'flood', 'hurricane', 'drought', 'conservation', 'pollution'],
+    keywords: ['climate', 'emissions', 'carbon', 'global warming', 'renewable', 'biodiversity', 'wildfire', 'flood', 'flooding', 'hurricane', 'drought', 'conservation', 'pollution'],
   },
   {
     slug: 'sports', label: 'Sports', emoji: '⚽',
@@ -143,7 +143,7 @@ export const CATEGORIES: CategoryDef[] = [
       { url: 'https://www.theverge.com/rss/entertainment/index.xml', source: 'The Verge' },
       G('culture'),
     ],
-    guardianSections: ['culture', 'film', 'music', 'games', 'tv-and-radio'], gnewsTopic: 'entertainment', mediastackCategory: 'entertainment',
+    guardianSections: ['film', 'music', 'games', 'tv-and-radio'], gnewsTopic: 'entertainment', mediastackCategory: 'entertainment',
     keywords: ['movie', 'film', 'box office', 'album', 'concert', 'streaming', 'netflix', 'celebrity', 'video game', 'oscar', 'grammy', 'television'],
   },
   {
@@ -152,7 +152,7 @@ export const CATEGORIES: CategoryDef[] = [
     color: 'var(--cat-education)', weight: 0.9,
     feeds: [BBC('news/education'), NYT('Education'), NPR(1013), G('education')],
     guardianSections: ['education'],
-    keywords: ['university', 'students', 'school', 'teacher', 'tuition', 'curriculum', 'college', 'campus', 'exam', 'academic'],
+    keywords: ['university', 'students', 'teacher', 'tuition', 'curriculum', 'college', 'campus', 'exam', 'academic'],
   },
   {
     slug: 'society', label: 'Society & Culture', emoji: '👥',
@@ -160,7 +160,7 @@ export const CATEGORIES: CategoryDef[] = [
     color: 'var(--cat-society)', weight: 0.9,
     feeds: [G('society')],
     guardianSections: ['society', 'inequality', 'global-development'],
-    keywords: ['migration', 'immigrant', 'immigration', 'community', 'inequality', 'poverty', 'homeless', 'gender', 'social media', 'culture', 'protest', 'housing'],
+    keywords: ['migration', 'immigrant', 'immigration', 'inequality', 'poverty', 'homeless', 'gender', 'social media', 'protest', 'housing'],
   },
 ];
 
@@ -179,7 +179,7 @@ export function normalizeSlug(raw: string): CategorySlug | null {
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const MATCHERS = CATEGORIES.map((c) => ({
   slug: c.slug,
-  re: new RegExp(`\\b(?:${c.keywords.map((k) => esc(k) + (k.length <= 4 ? '\\b' : '')).join('|')})`, 'i'),
+  re: new RegExp(`\\b(?:${c.keywords.map(esc).join('|')})(?:s|es|ed)?\\b`, 'i'),
 }));
 
 export function tagCategories(primary: CategorySlug, title: string, description?: string): CategorySlug[] {
