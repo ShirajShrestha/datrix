@@ -37,7 +37,7 @@ function fromCode(n: number, orig: string): string {
   return String.fromCodePoint(n);
 }
 
-function stripHtml(s: string): string {
+export function stripHtml(s: string): string {
   const text = s
     .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, ' ')
