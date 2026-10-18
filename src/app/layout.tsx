@@ -6,6 +6,7 @@ import MobileNav from "@/components/MobileNav";
 import Onboarding from "@/components/Onboarding";
 import MobileHeader from "@/components/MobileHeader";
 import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
+import PushSync from "@/components/PushSync";
 import { ThemeProvider } from "@/components/ThemeProvider";
 
 const inter = Inter({
@@ -68,6 +69,7 @@ export default function RootLayout({
             <MobileNav />
             <Onboarding />
             <ServiceWorkerRegister />
+            <PushSync />
           </div>
         </ThemeProvider>
       </body>

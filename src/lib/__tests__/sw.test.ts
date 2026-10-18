@@ -123,3 +123,58 @@ describe("sw SWR resilience", () => {
     expect(await res.text()).toBe('{"ok":1}');
   });
 });
+
+describe("sw push", () => {
+  const { sw } = load();
+  it("parsePushData handles valid, invalid, empty and oversize", () => {
+    expect(sw.parsePushData(JSON.stringify({ title: "T", body: "B", url: "/" }))).toEqual({ title: "T", body: "B", url: "/" });
+    const generic = { title: "Datrix", body: "Fresh stories are ready.", url: "/" };
+    expect(sw.parsePushData("not json")).toEqual(generic);
+    expect(sw.parsePushData("")).toEqual(generic);
+    expect(sw.parsePushData("null")).toEqual(generic);
+    expect(sw.parsePushData("[1]")).toEqual(generic);
+    expect(sw.parsePushData(JSON.stringify({ title: 5, body: "  " }))).toEqual(generic);
+    const big = sw.parsePushData(JSON.stringify({ title: "a".repeat(200), body: "b".repeat(500) }));
+    expect(big.title.length).toBe(80);
+    expect(big.body.length).toBe(240);
+  });
+  it("safeNotificationUrl only allows same-origin relative paths", () => {
+    expect(sw.safeNotificationUrl("/category/ai")).toBe("/category/ai");
+    for (const bad of ["//evil.com", "https://evil.com", "javascript:alert(1)", "/\\evil.com", "", undefined, 5]) {
+      expect(sw.safeNotificationUrl(bad)).toBe("/");
+    }
+  });
+  it("registers push and notificationclick handlers that use waitUntil", async () => {
+    const handlers: Record<string, any> = {};
+    const shown: any[] = [];
+    const focused: string[] = [];
+    const opened: string[] = [];
+    const self: any = {
+      location: { origin: ORIGIN },
+      addEventListener: (t: string, fn: any) => { handlers[t] = fn; },
+      registration: { showNotification: async (t: string, o: any) => { shown.push([t, o]); } },
+      clients: {
+        matchAll: async () => [{ url: ORIGIN + "/x", focus: async () => { focused.push("x"); }, navigate: async (u: string) => ({ focus: async () => { focused.push(u); } }) }],
+        openWindow: async (u: string) => { opened.push(u); },
+        claim: async () => {},
+      },
+    };
+    const sandbox: any = { self, caches: makeCaches(), fetch: async () => {}, Response, Request, Headers, URL, Date };
+    vm.createContext(sandbox);
+    vm.runInContext(src, sandbox);
+    const e1 = ev(null) as any;
+    e1.data = { text: () => '{"title":"Hi","body":"There","url":"/"}' };
+    handlers.push(e1);
+    await Promise.all(e1.pending);
+    expect(shown[0][0]).toBe("Hi");
+    expect(shown[0][1]).toMatchObject({ body: "There", tag: "datrix-daily", icon: "/icon-192.png", data: { url: "/" } });
+    let closed = false;
+    const e2 = ev(null) as any;
+    e2.notification = { close: () => { closed = true; }, data: { url: "//evil.com" } };
+    handlers.notificationclick(e2);
+    await Promise.all(e2.pending);
+    expect(closed).toBe(true);
+    expect(focused).toEqual([ORIGIN + "/"]);
+    expect(opened).toEqual([]);
+  });
+});

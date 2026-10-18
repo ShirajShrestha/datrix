@@ -1,8 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { usePrefs } from '@/lib/prefs';
+import { currentTimeZone, disablePush, enablePush, getPushSupport, hasPushSubscription, sendTestPush, type PushStatus } from '@/lib/pushClient';
 import { useHydrated } from '@/lib/useHydrated';
 import CategoryPicker from '@/components/CategoryPicker';
 import { ThemeToggle } from '@/components/ThemeToggle';
@@ -69,6 +70,127 @@ function ClearSaved() {
   );
 }
 
+
+const STATUS_MESSAGES: Record<Exclude<PushStatus, 'ok'>, string> = {
+  denied: 'Notifications are blocked in your browser settings',
+  unsupported: "This browser or build doesn't support push notifications",
+  'needs-install':
+    'On iPhone/iPad, first tap Share → Add to Home Screen, then open Datrix from your home screen and enable notifications there',
+  limit: 'Notification service is full right now, try again later',
+  error: "Couldn't enable notifications, try again",
+};
+const TEST_MESSAGES = {
+  sent: 'Test notification sent.',
+  cooldown: 'Please wait 30 seconds before sending another test.',
+  gone: 'Your subscription expired — please re-enable notifications.',
+  error: "Couldn't send the test notification.",
+} as const;
+
+function NotificationsSection() {
+  const hydrated = useHydrated();
+  const [prefs, setPrefs] = usePrefs();
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const [subscribed, setSubscribed] = useState(false);
+  const labelStyle: React.CSSProperties = { fontSize: 14, color: 'var(--text-secondary)', fontFamily: 'var(--font-sans)' };
+
+  useEffect(() => {
+    if (!hydrated) return;
+    let alive = true;
+    if (prefs.notifyEnabled) {
+      hasPushSubscription().then((v) => {
+        if (alive) setSubscribed(v);
+      });
+    }
+    return () => {
+      alive = false;
+    };
+  }, [hydrated, prefs.notifyEnabled]);
+
+  const onToggle = async (checked: boolean) => {
+    if (busy) return;
+    setBusy(true);
+    setMessage('');
+    if (checked) {
+      // Called directly from the click so the permission prompt keeps its user gesture.
+      const status = await enablePush(prefs);
+      if (status === 'ok') {
+        setPrefs({ notifyEnabled: true });
+        setSubscribed(true);
+        setMessage('Notifications enabled.');
+      } else {
+        setPrefs({ notifyEnabled: false });
+        setMessage(STATUS_MESSAGES[status]);
+      }
+    } else {
+      await disablePush();
+      setPrefs({ notifyEnabled: false });
+      setSubscribed(false);
+      setMessage('Notifications turned off.');
+    }
+    setBusy(false);
+  };
+
+  const onTest = async () => {
+    if (busy) return;
+    setBusy(true);
+    setMessage('');
+    const r = await sendTestPush();
+    if (r === 'gone') {
+      setPrefs({ notifyEnabled: false });
+      setSubscribed(false);
+    }
+    setMessage(TEST_MESSAGES[r]);
+    setBusy(false);
+  };
+
+  const support = hydrated ? getPushSupport() : 'ok';
+  const toggleDisabled = !hydrated || busy || (!prefs.notifyEnabled && support !== 'ok');
+
+  return (
+    <section style={sectionStyle} aria-labelledby="set-notify">
+      <h2 id="set-notify" style={h2Style}>Notifications</h2>
+      <p style={{ ...hintStyle, marginBottom: 12 }}>
+        Get one notification a day at the time you choose, sent after the daily news refresh, with your selected categories.
+      </p>
+      <div className="flex items-center gap-6 flex-wrap">
+        <label className="flex items-center gap-2" style={labelStyle}>
+          <input
+            type="checkbox"
+            disabled={toggleDisabled}
+            checked={hydrated && prefs.notifyEnabled}
+            onChange={(e) => onToggle(e.target.checked)}
+          />
+          Daily digest notification
+        </label>
+        <label className="flex items-center gap-2" style={labelStyle}>
+          Send time
+          <input
+            type="time"
+            step={300}
+            value={prefs.notifyTime}
+            disabled={!hydrated || busy}
+            onChange={(e) => {
+              if (e.target.value) setPrefs({ notifyTime: e.target.value });
+            }}
+            style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-highlight)', borderRadius: 6, padding: '4px 8px', color: 'var(--text-primary)' }}
+          />
+        </label>
+        <button type="button" style={{ ...btn, opacity: prefs.notifyEnabled && subscribed && !busy ? 1 : 0.5 }} disabled={!hydrated || busy || !prefs.notifyEnabled || !subscribed} onClick={onTest}>
+          Send test notification
+        </button>
+      </div>
+      <p style={{ ...hintStyle, marginTop: 12 }}>Your time zone: {hydrated ? currentTimeZone() : '…'}</p>
+      <p style={{ ...hintStyle, marginTop: 4 }}>
+        On iPhone/iPad: tap Share → Add to Home Screen first, then open Datrix from your home screen to enable notifications.
+      </p>
+      <p role="status" aria-live="polite" style={{ ...hintStyle, marginTop: 8, color: 'var(--text-primary)', minHeight: 18 }}>
+        {message}
+      </p>
+    </section>
+  );
+}
+
 export default function SettingsPage() {
   const hydrated = useHydrated();
   const [prefs, setPrefs] = usePrefs();
@@ -97,31 +219,7 @@ export default function SettingsPage() {
           )}
         </section>
 
-        <section style={sectionStyle} aria-labelledby="set-notify">
-          <h2 id="set-notify" style={h2Style}>Notifications</h2>
-          <p style={{ ...hintStyle, marginBottom: 12 }}>Coming in a later update</p>
-          <div className="flex items-center gap-6 flex-wrap" style={{ opacity: 0.6 }}>
-            <label className="flex items-center gap-2" style={{ fontSize: 14, color: 'var(--text-secondary)', fontFamily: 'var(--font-sans)' }}>
-              <input
-                type="checkbox"
-                disabled
-                checked={prefs.notifyEnabled}
-                onChange={(e) => setPrefs({ notifyEnabled: e.target.checked })}
-              />
-              Daily digest notification
-            </label>
-            <label className="flex items-center gap-2" style={{ fontSize: 14, color: 'var(--text-secondary)', fontFamily: 'var(--font-sans)' }}>
-              Time
-              <input
-                type="time"
-                disabled
-                value={prefs.notifyTime}
-                onChange={(e) => setPrefs({ notifyTime: e.target.value })}
-                style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-highlight)', borderRadius: 6, padding: '4px 8px', color: 'var(--text-primary)' }}
-              />
-            </label>
-          </div>
-        </section>
+        <NotificationsSection />
 
         <section style={sectionStyle} aria-labelledby="set-theme">
           <div className="flex items-center justify-between">

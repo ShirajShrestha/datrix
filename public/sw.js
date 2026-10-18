@@ -1,5 +1,5 @@
 /* Datrix service worker. Hand-written; committed as-is (not generated).
- * Sections: 1) config  2) pure helpers  3) cache handlers  4) lifecycle  5) fetch routing  6) push (Task 18)
+ * Sections: 1) config  2) pure helpers  3) cache handlers  4) lifecycle  5) fetch routing  6) push
  */
 
 // ---- 1. Config -------------------------------------------------------------
@@ -185,6 +185,74 @@ self.addEventListener('fetch', (event) => {
 });
 
 // Test-only hook (harmless in production): exposes internals to src/lib/__tests__/sw.test.ts.
-self.__datrixSw = { routeFor, isCacheable, isLegacyCacheName, navigationHandler, staleWhileRevalidateArticles, cacheFirst, safePut, SHELL_CACHE, ARTICLES_CACHE };
+self.__datrixSw = { parsePushData, safeNotificationUrl, handleNotificationClick, routeFor, isCacheable, isLegacyCacheName, navigationHandler, staleWhileRevalidateArticles, cacheFirst, safePut, SHELL_CACHE, ARTICLES_CACHE };
 
-// ---- 6. Push (Task 18 adds 'push' and 'notificationclick' handlers here) ---
+
+// ---- 6. Push ---------------------------------------------------------------
+const DEFAULT_PUSH_TITLE = 'Datrix';
+const DEFAULT_PUSH_BODY = 'Fresh stories are ready.';
+
+// Only same-origin relative paths; anything else falls back to '/'.
+function safeNotificationUrl(url) {
+  if (typeof url !== 'string' || url.length > 2048) return '/';
+  if (!url.startsWith('/') || url.startsWith('//') || url.startsWith('/\\')) return '/';
+  return url;
+}
+
+// Never throws. Invalid/empty payloads give the generic notification.
+function parsePushData(text) {
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = null; }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) data = {};
+  const clean = (v, max, fallback) => {
+    if (typeof v !== 'string') return fallback;
+    const t = v.trim();
+    return t ? t.slice(0, max) : fallback;
+  };
+  return {
+    title: clean(data.title, 80, DEFAULT_PUSH_TITLE),
+    body: clean(data.body, 240, DEFAULT_PUSH_BODY),
+    url: safeNotificationUrl(data.url),
+  };
+}
+
+async function handleNotificationClick(rawUrl) {
+  const url = safeNotificationUrl(rawUrl);
+  const target = new URL(url, self.location.origin).href;
+  const list = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+  for (const client of list) {
+    let sameOrigin = false;
+    try { sameOrigin = new URL(client.url).origin === self.location.origin; } catch {}
+    if (!sameOrigin) continue;
+    try {
+      if (client.url !== target && typeof client.navigate === 'function') {
+        const navigated = await client.navigate(target);
+        if (navigated && navigated.focus) return await navigated.focus();
+      }
+      return await client.focus();
+    } catch {}
+  }
+  return self.clients.openWindow(target);
+}
+
+self.addEventListener('push', (event) => {
+  let text = '';
+  try { text = event.data ? event.data.text() : ''; } catch {}
+  const { title, body, url } = parsePushData(text);
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      tag: 'datrix-daily',
+      renotify: false,
+      data: { url },
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = event.notification.data && event.notification.data.url;
+  event.waitUntil(handleNotificationClick(url).catch(() => {}));
+});
