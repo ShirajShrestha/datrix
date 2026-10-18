@@ -44,9 +44,9 @@ const ArticleSchema = new Schema<IArticle>(
     // with upsert) bypass schema defaults, so Task 9 must set expireAt explicitly on every upsert.
     expireAt: {
       type: Date,
-      default(this: { publishedAt?: Date }) {
+      default(this: { publishedAt?: Date } | null) {
         const now = Date.now();
-        if (!this.publishedAt) return new Date(now + 30 * DAY_MS);
+        if (!this?.publishedAt) return new Date(now + 30 * DAY_MS);
         return new Date(Math.max(new Date(this.publishedAt).getTime() + 30 * DAY_MS, now + DAY_MS));
       },
     },
