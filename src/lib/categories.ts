@@ -143,7 +143,7 @@ export const CATEGORIES: CategoryDef[] = [
       { url: 'https://www.theverge.com/rss/entertainment/index.xml', source: 'The Verge' },
       G('culture'),
     ],
-    guardianSections: ['film', 'music', 'games', 'tv-and-radio'], gnewsTopic: 'entertainment', mediastackCategory: 'entertainment',
+    guardianSections: ['culture', 'film', 'music', 'games', 'tv-and-radio'], gnewsTopic: 'entertainment', mediastackCategory: 'entertainment',
     keywords: ['movie', 'film', 'box office', 'album', 'concert', 'streaming', 'netflix', 'celebrity', 'video game', 'oscar', 'grammy', 'television'],
   },
   {

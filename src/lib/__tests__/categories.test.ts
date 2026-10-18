@@ -50,4 +50,7 @@ describe('category registry', () => {
     const r = tagCategories('ai', 'AI and artificial intelligence');
     expect(r).toEqual(['ai']);
   });
+  it('entertainment keeps its Guardian sections', () => {
+    expect(getCategory('entertainment')?.guardianSections).toEqual(['culture', 'film', 'music', 'games', 'tv-and-radio']);
+  });
 });
