@@ -1,5 +1,5 @@
 import { CATEGORIES, type CategorySlug } from '@/lib/categories';
-import type { RawArticle } from './types';
+import { SourceError, type RawArticle } from './types';
 import { stripHtml } from './rss';
 
 export interface GuardianResult {
@@ -29,7 +29,7 @@ export function mapGuardianResult(r: GuardianResult, category: CategorySlug): Ra
   };
 }
 
-async function fetchSection(section: string, key: string): Promise<GuardianResult[]> {
+async function fetchSection(section: string, key: string): Promise<GuardianResult[] | null> {
   try {
     const qs = new URLSearchParams({
       section,
@@ -43,13 +43,13 @@ async function fetchSection(section: string, key: string): Promise<GuardianResul
     });
     if (!res.ok) {
       console.warn(`[guardian] section ${section} failed: HTTP ${res.status}`);
-      return [];
+      return null;
     }
     const json = await res.json();
     return Array.isArray(json?.response?.results) ? json.response.results : [];
   } catch {
     console.warn(`[guardian] section ${section} failed`);
-    return [];
+    return null;
   }
 }
 
@@ -59,8 +59,10 @@ export async function fetchGuardian(): Promise<RawArticle[]> {
 
   // One call per unique section; reuse the result for every category listing it.
   const sections = [...new Set(CATEGORIES.flatMap((c) => c.guardianSections))];
-  const bySection = new Map<string, GuardianResult[]>();
+  const bySection = new Map<string, GuardianResult[] | null>();
   await Promise.all(sections.map(async (s) => { bySection.set(s, await fetchSection(s, key)); }));
+  // Every attempted request failed: surface it so fetchAllSources can report the adapter.
+  if (sections.length > 0 && [...bySection.values()].every((v) => v === null)) throw new SourceError('guardian');
 
   const out: RawArticle[] = [];
   for (const cat of CATEGORIES) {

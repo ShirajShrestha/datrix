@@ -1,5 +1,5 @@
 import { CATEGORIES, type CategorySlug } from '@/lib/categories';
-import type { RawArticle } from './types';
+import { SourceError, type RawArticle } from './types';
 import { stripHtml } from './rss';
 
 export interface GNewsArticle {
@@ -31,7 +31,7 @@ export function mapGNewsArticle(a: GNewsArticle, category: CategorySlug): RawArt
   };
 }
 
-async function fetchTopic(topic: string, slug: CategorySlug, key: string): Promise<RawArticle[]> {
+async function fetchTopic(topic: string, slug: CategorySlug, key: string): Promise<RawArticle[] | null> {
   try {
     const qs = new URLSearchParams({ category: topic, lang: 'en', max: '10', apikey: key });
     const res = await fetch(`https://gnews.io/api/v4/top-headlines?${qs}`, {
@@ -39,14 +39,14 @@ async function fetchTopic(topic: string, slug: CategorySlug, key: string): Promi
     });
     if (!res.ok) {
       console.warn(`[gnews] ${topic} failed: HTTP ${res.status}`);
-      return [];
+      return null;
     }
     const json = await res.json();
     const list: GNewsArticle[] = Array.isArray(json?.articles) ? json.articles : [];
     return list.map((a) => mapGNewsArticle(a, slug)).filter((a): a is RawArticle => a !== null);
   } catch {
     console.warn(`[gnews] ${topic} failed`);
-    return [];
+    return null;
   }
 }
 
@@ -55,5 +55,6 @@ export async function fetchGNews(): Promise<RawArticle[]> {
   if (!key) return [];
   const jobs = CATEGORIES.filter((c) => c.gnewsTopic);
   const results = await Promise.all(jobs.map((c) => fetchTopic(c.gnewsTopic!, c.slug, key)));
-  return results.flat();
+  if (results.length > 0 && results.every((r) => r === null)) throw new SourceError('gnews');
+  return results.flatMap((r) => r ?? []);
 }

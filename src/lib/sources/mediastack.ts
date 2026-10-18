@@ -1,5 +1,5 @@
 import { CATEGORIES, type CategorySlug } from '@/lib/categories';
-import type { RawArticle } from './types';
+import { SourceError, type RawArticle } from './types';
 import { stripHtml } from './rss';
 
 export interface MediaStackArticle {
@@ -13,9 +13,9 @@ export interface MediaStackArticle {
 
 const TIMEOUT_MS = 8000;
 
-const stockTickerPattern = /\b(OTCMKTS|NYSE|TSE|AMEX|NASDAQ)\b/i;
-const lowQualityPattern = /\b( Sets New \d+-Year High| Reaches New \d+-Week High| Hits New \d+-Year High| Sets New \d+-Month High| Time to Buy| What's Next| Here's What Happened)\b/i;
-const earningsPattern = /\b(Q[1-4]\s*\d{4}\s*Earnings Call Transcript)\b/i;
+const stockTickerPattern = /\b(?:OTCMKTS|NYSE|TSE|AMEX|NASDAQ)\b/i;
+const lowQualityPattern = /(?:Sets|Hits|Reaches) New \d+-(?:Year|Month|Week) High|Time to Buy|What's Next|Here's What Happened/i;
+const earningsPattern = /Q[1-4]\s*\d{4}\s*Earnings Call Transcript/i;
 
 export function isLowQualityTitle(title: string): boolean {
   return (stockTickerPattern.test(title) && lowQualityPattern.test(title)) || earningsPattern.test(title);
@@ -40,7 +40,7 @@ export function mapMediaStackArticle(a: MediaStackArticle, category: CategorySlu
   };
 }
 
-async function fetchCategory(msCategory: string, slug: CategorySlug, key: string): Promise<RawArticle[]> {
+async function fetchCategory(msCategory: string, slug: CategorySlug, key: string): Promise<RawArticle[] | null> {
   try {
     const qs = new URLSearchParams({
       access_key: key,
@@ -55,14 +55,14 @@ async function fetchCategory(msCategory: string, slug: CategorySlug, key: string
     });
     if (!res.ok) {
       console.warn(`[mediastack] ${msCategory} failed: HTTP ${res.status}`);
-      return [];
+      return null;
     }
     const json = await res.json();
     const list: MediaStackArticle[] = Array.isArray(json?.data) ? json.data : [];
     return list.map((a) => mapMediaStackArticle(a, slug)).filter((a): a is RawArticle => a !== null);
   } catch {
     console.warn(`[mediastack] ${msCategory} failed`);
-    return [];
+    return null;
   }
 }
 
@@ -77,5 +77,6 @@ export async function fetchMediaStack(): Promise<RawArticle[]> {
     return true;
   });
   const results = await Promise.all(jobs.map((c) => fetchCategory(c.mediastackCategory!, c.slug, key)));
-  return results.flat();
+  if (results.length > 0 && results.every((r) => r === null)) throw new SourceError('mediastack');
+  return results.flatMap((r) => r ?? []);
 }

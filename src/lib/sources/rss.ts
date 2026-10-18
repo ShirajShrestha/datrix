@@ -1,6 +1,6 @@
 import Parser from 'rss-parser';
 import { CATEGORIES, type CategorySlug, type FeedDef } from '@/lib/categories';
-import type { RawArticle } from './types';
+import { SourceError, type RawArticle } from './types';
 
 interface MediaNode { $?: { url?: string; medium?: string; type?: string } }
 
@@ -132,7 +132,8 @@ export function parseRssItem(item: RssItem, feed: FeedDef, category: CategorySlu
   };
 }
 
-async function fetchFeed(feed: FeedDef, category: CategorySlug): Promise<RawArticle[]> {
+// Returns null when the feed request failed (so the adapter can tell failure from an empty feed).
+async function fetchFeed(feed: FeedDef, category: CategorySlug): Promise<RawArticle[] | null> {
   try {
     const res = await fetch(feed.url, {
       signal: AbortSignal.timeout(FEED_TIMEOUT_MS),
@@ -148,7 +149,7 @@ async function fetchFeed(feed: FeedDef, category: CategorySlug): Promise<RawArti
       .filter((a): a is RawArticle => a !== null);
   } catch (err) {
     console.warn(`[rss] feed failed: ${feed.url} (${err instanceof Error ? err.message : 'error'})`);
-    return [];
+    return null;
   }
 }
 
@@ -159,7 +160,7 @@ export async function fetchRss(): Promise<RawArticle[]> {
   for (const cat of CATEGORIES) for (const feed of cat.feeds) jobs.push({ feed, category: cat.slug });
 
   // Duplicates across category feeds are intentionally returned; scoring.deduplicateArticles merges them.
-  const results: RawArticle[][] = new Array(jobs.length);
+  const results: Array<RawArticle[] | null> = new Array(jobs.length);
   let next = 0;
   const worker = async () => {
     while (next < jobs.length) {
@@ -168,5 +169,6 @@ export async function fetchRss(): Promise<RawArticle[]> {
     }
   };
   await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENCY, jobs.length) }, worker));
-  return results.flat();
+  if (jobs.length > 0 && results.every((r) => r === null)) throw new SourceError('rss');
+  return results.flatMap((r) => r ?? []);
 }

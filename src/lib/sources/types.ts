@@ -11,3 +11,11 @@ export interface RawArticle {
   description?: string;
   imageUrl?: string;
 }
+
+/** Thrown by an adapter when every attempted request failed. Message never carries URLs, keys or causes. */
+export class SourceError extends Error {
+  constructor(public readonly adapter: string) {
+    super(`${adapter} all requests failed`);
+    this.name = 'SourceError';
+  }
+}
