@@ -1,11 +1,13 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { CATEGORIES, getCategory, normalizeSlug } from '@/lib/categories';
 import { usePreviousVisit } from '@/lib/prefs';
 import { isNewSince, safeImageUrl } from '@/lib/freshness';
-import { ChevronDown, Bookmark, ExternalLink, Sparkles, Share2 } from 'lucide-react';
+import { pickDescription } from '@/lib/storyView';
+import { useStoryModal } from '@/components/StoryModalProvider';
+import { Bookmark, Share2 } from 'lucide-react';
 
 export interface NewsArticle {
   _id: string;
@@ -16,6 +18,9 @@ export interface NewsArticle {
   /** Legacy single category; only present on old saved snapshots. */
   category?: string;
   imageUrl?: string;
+  description?: string;
+  images?: string[];
+  brief?: { whatHappened: string; whyItMatters?: string; background?: string; provider?: string };
   sources?: { name: string; url: string }[];
   publishedAt: string | Date;
   importanceScore: number;
@@ -75,18 +80,13 @@ function relativeTime(value: string | Date): string | null {
   }
 }
 
-function text(v: unknown): string {
-  return typeof v === 'string' ? v : '';
-}
-
 export default function NewsCard({ article, onSave }: NewsCardProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
   const [isSaved, setIsSaved] = useState(article.isSaved || false);
   const [bookmarkAnimating, setBookmarkAnimating] = useState(false);
   // Track the URL that failed (not a boolean) so a changed imageUrl gets a fresh attempt.
   const [failedImg, setFailedImg] = useState<string | null>(null);
   const previousVisit = usePreviousVisit();
-  const panelId = useId();
+  const { openStory } = useStoryModal();
 
   const isHigh = article.importanceScore >= 0.75;
   const isMedium = article.importanceScore >= 0.5;
@@ -101,17 +101,9 @@ export default function NewsCard({ article, onSave }: NewsCardProps) {
   const time = relativeTime(article.publishedAt);
   const isNew = isNewSince(article.publishedAt, previousVisit);
 
-  const sourceLinks = (Array.isArray(article.sources) ? article.sources : [])
-    .filter((s) => s && typeof s.url === 'string' && safeImageUrl(s.url) !== null)
-    .map((s) => ({ name: text(s.name) || text(article.source) || 'Source', url: s.url }));
-  const links = sourceLinks.length ? sourceLinks : [{ name: text(article.source) || 'Source', url: article.url }];
   const sourceCount = Array.isArray(article.sources) ? article.sources.length : 0;
 
-  const summary = article.summary;
-  const tldr = text(summary?.tldr);
-  const bullets = Array.isArray(summary?.bullets) ? summary!.bullets.filter((b) => typeof b === 'string') : [];
-  const why = text(summary?.whyItMatters).trim();
-  const hasDetails = bullets.length > 0 || why.length > 0 || links.length > 0;
+  const description = pickDescription(article);
 
   const handleSave = () => {
     setIsSaved(!isSaved);
@@ -126,7 +118,7 @@ export default function NewsCard({ article, onSave }: NewsCardProps) {
     }
   };
 
-  const toggle = () => setIsExpanded((v) => !v);
+  const open = () => openStory(article);
   const iconBtn = 'p-1.5 rounded-md transition-all';
 
   return (
@@ -236,9 +228,8 @@ export default function NewsCard({ article, onSave }: NewsCardProps) {
             >
               <button
                 type="button"
-                onClick={toggle}
-                aria-expanded={isExpanded}
-                aria-controls={panelId}
+                onClick={open}
+                aria-haspopup="dialog"
                 className="text-left cursor-pointer break-words min-w-0 max-w-full"
                 style={{ color: 'inherit', font: 'inherit' }}
               >
@@ -246,9 +237,9 @@ export default function NewsCard({ article, onSave }: NewsCardProps) {
               </button>
             </h3>
 
-            {tldr && (
-              <p className="line-clamp-2 mb-3" style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--text-secondary)' }}>
-                {tldr}
+            {description && (
+              <p className="line-clamp-3 mb-3" style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--text-secondary)' }}>
+                {description}
               </p>
             )}
 
@@ -282,92 +273,16 @@ export default function NewsCard({ article, onSave }: NewsCardProps) {
                 </button>
                 <button
                   type="button"
-                  onClick={toggle}
-                  aria-expanded={isExpanded}
-                  aria-controls={panelId}
+                  onClick={open}
+                  aria-haspopup="dialog"
                   className="flex items-center gap-1 ml-2 pl-2 border-l border-[var(--border)] cursor-pointer"
                   style={{ color: 'var(--text-secondary)', fontSize: 13 }}
                 >
-                  <span>{isExpanded ? 'Show less' : 'Read more'}</span>
-                  <ChevronDown className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                  <span>Read more</span>
                 </button>
               </div>
             </div>
           </div>
-        </div>
-
-        <div id={panelId}>
-          {isExpanded && hasDetails && (
-            <div className="mt-4 pt-4 border-t border-[var(--border)] animate-in slide-in-from-top-2 duration-200">
-              <div className="space-y-4">
-                {bullets.length > 0 && (
-                  <div>
-                    <h4
-                      className="text-[11px] font-semibold mb-3 flex items-center gap-2 uppercase tracking-wider"
-                      style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-sans)' }}
-                    >
-                      <Sparkles className="w-3.5 h-3.5" style={{ color: categoryStyle.text }} />
-                      Key Points
-                    </h4>
-                    <ul className="space-y-2">
-                      {bullets.map((bullet, idx) => (
-                        <li key={idx} className="text-[13px] flex items-start gap-2.5 leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-                          <span className="w-1.5 h-1.5 rounded-sm mt-1.5 shrink-0" style={{ backgroundColor: categoryStyle.dot }} />
-                          <span>{bullet}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                {why && (
-                  <div
-                    className="p-4 rounded-lg"
-                    style={{ borderLeftColor: categoryStyle.dot, backgroundColor: categoryStyle.tint, borderLeftWidth: '3px' }}
-                  >
-                    <h4 className="text-[11px] font-semibold mb-2 uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}>
-                      Why It Matters
-                    </h4>
-                    <p className="text-[13px] leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-                      {why}
-                    </p>
-                  </div>
-                )}
-
-                <div>
-                  <h4 className="text-[11px] font-semibold mb-2 uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}>
-                    {links.length > 1 ? 'Sources' : 'Source'}
-                  </h4>
-                  <ul className="space-y-1">
-                    {links.map((l, idx) => (
-                      <li key={`${l.url}-${idx}`}>
-                        <a
-                          href={l.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-[13px] hover:opacity-80 transition-opacity underline-offset-2 hover:underline break-words min-w-0"
-                          style={{ color: categoryStyle.text }}
-                        >
-                          {l.name}
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-
-                <a
-                  href={article.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 text-[13px] hover:opacity-80 transition-opacity"
-                  style={{ color: categoryStyle.text }}
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  Read full article
-                </a>
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </article>
