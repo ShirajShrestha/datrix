@@ -201,6 +201,11 @@ a:focus-visible {
   transition: opacity 150ms ease;
 }
 
-.group:hover .card-actions {
+.group:hover .card-actions,
+.card-actions:focus-within {
   opacity: 1;
+}
+
+@media (hover: none) {
+  .card-actions { opacity: 1; }
 }
