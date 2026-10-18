@@ -1,6 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { extractOgImage, resolveImages } from '@/lib/services/images';
 
+type FetchImpl = NonNullable<NonNullable<Parameters<typeof resolveImages>[1]>['fetchImpl']>;
+type Item = { url: string; imageUrl?: string };
+
 const base = 'https://example.com/news/a';
 
 describe('extractOgImage', () => {
@@ -36,14 +39,14 @@ const page = (img: string) =>
 describe('resolveImages', () => {
   it('fetches only first max items lacking images, preserves order and skips existing', async () => {
     const calls: string[] = [];
-    const fetchImpl = vi.fn(async (u: any) => { calls.push(String(u)); return page('https://i.example.com/' + calls.length + '.jpg'); });
-    const items = [
+    const fetchImpl = vi.fn(async (u: string) => { calls.push(String(u)); return page('https://i.example.com/' + calls.length + '.jpg'); });
+    const items: Item[] = [
       { url: 'https://e.com/1' },
       { url: 'https://e.com/2', imageUrl: 'https://keep/2.jpg' },
       { url: 'https://e.com/3' },
       { url: 'https://e.com/4' },
     ];
-    const out = await resolveImages(items, { max: 2, concurrency: 1, fetchImpl: fetchImpl as any });
+    const out = await resolveImages(items, { max: 2, concurrency: 1, fetchImpl: fetchImpl as FetchImpl });
     expect(calls).toEqual(['https://e.com/1', 'https://e.com/3']);
     expect(out.map((i) => i.url)).toEqual(items.map((i) => i.url));
     expect(out[0].imageUrl).toBeDefined();
@@ -54,21 +57,21 @@ describe('resolveImages', () => {
   it('never exceeds concurrency', async () => {
     let active = 0, peak = 0;
     const fetchImpl = async () => { active++; peak = Math.max(peak, active); await new Promise((r) => setTimeout(r, 10)); active--; return page('https://i.example.com/a.jpg'); };
-    await resolveImages(Array.from({ length: 10 }, (_, i) => ({ url: 'https://e.com/' + i })), { concurrency: 3, fetchImpl: fetchImpl as any });
+    await resolveImages(Array.from({ length: 10 }, (_, i) => ({ url: 'https://e.com/' + i })), { concurrency: 3, fetchImpl: fetchImpl as FetchImpl });
     expect(peak).toBeLessThanOrEqual(3);
   });
   it('never throws on a rejecting or hanging fetch', async () => {
     const items = [{ url: 'https://e.com/a' }, { url: 'https://e.com/b' }];
-    const rejecting = await resolveImages(items, { timeoutMs: 50, fetchImpl: (async () => { throw new Error('boom'); }) as any });
+    const rejecting = await resolveImages(items, { timeoutMs: 50, fetchImpl: (async () => { throw new Error('boom'); }) as FetchImpl });
     expect(rejecting).toEqual(items);
     const hanging = await resolveImages(items, {
       timeoutMs: 50,
-      fetchImpl: ((_u: any, init: any) => new Promise(() => { /* ignores abort: never settles */ void init; })) as any,
+      fetchImpl: ((_u: string, init?: RequestInit) => new Promise<Response>(() => { /* ignores abort: never settles */ void init; })) as FetchImpl,
     });
     expect(hanging).toEqual(items);
   });
   it('ignores non-ok responses', async () => {
-    const out = await resolveImages([{ url: 'https://e.com/a' }], { fetchImpl: (async () => new Response('x', { status: 403 })) as any });
+    const out = await resolveImages<Item>([{ url: 'https://e.com/a' }], { fetchImpl: (async () => new Response('x', { status: 403 })) as FetchImpl });
     expect(out[0].imageUrl).toBeUndefined();
   });
 });

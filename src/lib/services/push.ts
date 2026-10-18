@@ -50,7 +50,6 @@ export function isDue(
 
 function cleanHeadline(s: string): string {
   const t = s
-    // eslint-disable-next-line no-control-regex
     .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
     .replace(/[\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g, '')
     .replace(/[<>]/g, '')
@@ -160,7 +159,6 @@ const KEY_RE = /^[A-Za-z0-9_\-=]+$/;
 export function isAllowedPushEndpoint(url: string): boolean {
   if (typeof url !== 'string' || url.length === 0 || url.length > MAX_ENDPOINT_LEN) return false;
   // Backslashes, whitespace and control chars are parsed differently by WHATWG URL and legacy url.parse.
-  // eslint-disable-next-line no-control-regex
   if (/[\\\s\u0000-\u001f\u007f-\u009f]/.test(url)) return false;
   // No percent-escapes in the authority (e.g. fcm%2egoogleapis.com).
   const authority = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i.exec(url)?.[1];

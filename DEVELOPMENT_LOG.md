@@ -1,3 +1,5 @@
+> **Superseded.** This file describes the pre-v2 NewsIntel app. The current design is in `docs/superpowers/specs/2026-10-18-newsintel-v2-design.md` and the implementation plan is `docs/superpowers/plans/2026-10-18-datrix-v2.md`. Kept as history.
+
 # NewsIntel Development Log
 
 ## Project Overview
@@ -296,7 +298,7 @@ jobs:
     steps:
       - name: Call Vercel News Cron
         run: |
-          curl -X GET "https://newsintel.vercel.app/api/cron/news" \
+          curl -X GET "https://your-app.vercel.app/api/cron/news" \
             -H "Authorization: Bearer ${CRON_SECRET}"
 
   fetch-digest:
@@ -305,7 +307,7 @@ jobs:
     steps:
       - name: Call Vercel Digest Cron
         run: |
-          curl -X GET "https://newsintel.vercel.app/api/cron/digest" \
+          curl -X GET "https://your-app.vercel.app/api/cron/digest" \
             -H "Authorization: Bearer ${CRON_SECRET}"
 ```
 
@@ -383,3 +385,22 @@ jobs:
 1. **Lint errors** - Fixed various lint warnings across codebase
 2. **Saved page hydration** - Fixed setState in effect warnings
 3. **NewsCard cleanup** - Removed unused variables
+
+
+---
+
+## 2026-10-18 - Datrix v2
+
+NewsIntel was renamed Datrix and rebuilt around the spec in `docs/superpowers/specs/2026-10-18-newsintel-v2-design.md`.
+
+- 14 categories (replacing the hard-coded four); legacy `tech`/`economy` map to `technology`/`business`. Articles carry multiple categories.
+- Onboarding and Settings; preferences stored on the device (`datrix_prefs`). No accounts.
+- New ingest pipeline: RSS (47 feeds), Guardian, GNews, MediaStack, scoring, token-based dedupe with "N sources", top 25 per category, `og:image` fallback.
+- Summaries via Groq -> Gemini -> extractive; LLM only for articles lacking an LLM summary.
+- Articles expire 30 days after publish through an `expireAt` TTL index (existing `publishedAt` indexes untouched).
+- Installable PWA with a hand-written service worker, offline page and offline last feed.
+- Daily Web Push at a chosen time per subscription (VAPID, time zone aware, 3 hour catch-up window).
+- Schedulers: GitHub Actions only (ingest daily 00:00 UTC, push every 15 min); Vercel cron removed. Old cron URLs and times above are historical.
+- README rewritten with env table, setup, and free-tier call counts.
+- Cleanup: lint and `tsc` clean, package renamed to `datrix`.
+- Deferred and known limits are listed in the README.

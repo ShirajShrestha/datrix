@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { localParts, isDue, buildPayload, sendToSub, _resetVapidForTests, PUSH_WINDOW_MINUTES } from '@/lib/services/push';
+import { localParts, isDue, buildPayload, sendToSub, sendToSubDetailed, isAllowedPushEndpoint, validateSubscribeBody, _resetVapidForTests, PUSH_WINDOW_MINUTES } from '@/lib/services/push';
 import { PushSub } from '@/lib/models/PushSub';
 
 const NPT = { time: '08:00', timeZone: 'Asia/Kathmandu' };
@@ -172,8 +172,6 @@ describe('PushSub schema', () => {
   });
 });
 
-import { isAllowedPushEndpoint, validateSubscribeBody } from '@/lib/services/push';
-
 describe('isAllowedPushEndpoint', () => {
   it.each([
     'https://fcm.googleapis.com/fcm/send/abc',
@@ -282,7 +280,6 @@ describe('endpoint hardening', () => {
   });
 });
 
-import { sendToSubDetailed } from '@/lib/services/push';
 describe('sendToSubDetailed status mapping', () => {
   const sub = { endpoint: 'https://fcm.googleapis.com/fcm/send/abc', keys: { p256dh: 'p', auth: 'a' } };
   beforeEach(() => { process.env.VAPID_SUBJECT = 'mailto:a@b.co'; process.env.VAPID_PUBLIC_KEY = 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U'; process.env.VAPID_PRIVATE_KEY = 'UUxI4O8-FbRouAevSmBQ6o18hgE4nSG3qwvJTfKc-ls'; _resetVapidForTests(); });

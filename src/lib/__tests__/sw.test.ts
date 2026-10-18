@@ -39,8 +39,7 @@ function basic(body: string, init: ResponseInit = {}, type = "basic") {
   return r;
 }
 function req(path: string, init: any = {}) {
-  const r: any = new Request(ORIGIN + path, init);
-  return Object.assign(r, init.mode ? {} : {});
+  return new Request(ORIGIN + path, init);
 }
 function ev(request: any) {
   const pending: Promise<any>[] = [];

@@ -1,3 +1,5 @@
+> **Superseded.** This file describes the pre-v2 NewsIntel app. The current design is in `docs/superpowers/specs/2026-10-18-newsintel-v2-design.md` and the implementation plan is `docs/superpowers/plans/2026-10-18-datrix-v2.md`. Kept as history.
+
 # 1. What This App Is (Clear Product Definition)
 
 ### App Name (working)
