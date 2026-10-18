@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   isObjectId, buildStoryHref, readStoryParam, initialBriefState, briefReducer,
-  interpretBriefResponse, shouldFetchBrief,
+  interpretBriefResponse, shouldFetchBrief, closeAction,
 } from '../storyModalState';
-import { toggleSaved } from '../savedArticles';
+import { toggleSaved, readSaved, toggleSavedStored, SAVED_CHANGED_EVENT } from '../savedArticles';
 
 const id = 'a'.repeat(24);
 
@@ -59,5 +59,30 @@ describe('toggleSaved', () => {
     const added = toggleSaved([], a);
     expect(added).toEqual([{ _id: '1', t: 'x', isSaved: true }]);
     expect(toggleSaved(added, a)).toEqual([]);
+  });
+});
+
+describe('closeAction', () => {
+  it('goes back only when our pushed entry is current', () => {
+    expect(closeAction(true, id, `?story=${id}`)).toBe('back');
+    expect(closeAction(true, id, '?story=other')).toBe('strip');
+    expect(closeAction(false, null, `?story=${id}`)).toBe('strip');
+    expect(closeAction(true, id, '')).toBe('none');
+  });
+});
+
+describe('savedArticles storage', () => {
+  it('filters non-objects, dispatches event, reports real state', async () => {
+    const store: Record<string, string> = { newsintel_saved_articles: JSON.stringify([null, 5, { _id: '9' }]) };
+    const events: string[] = [];
+    const g = globalThis as unknown as Record<string, unknown>;
+    g.window = { dispatchEvent: (e: Event) => { events.push(e.type); return true; } };
+    g.localStorage = { getItem: (k: string) => store[k] ?? null, setItem: (k: string, v: string) => { store[k] = v; } };
+    expect(readSaved()).toEqual([{ _id: '9' }]);
+    expect(toggleSavedStored({ _id: '1' })).toBe(true);
+    expect(events).toEqual([SAVED_CHANGED_EVENT]);
+    g.localStorage = { getItem: () => null, setItem: () => { throw new Error('full'); } };
+    expect(toggleSavedStored({ _id: '1' })).toBe(false);
+    delete g.window; delete g.localStorage;
   });
 });

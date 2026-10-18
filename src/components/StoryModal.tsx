@@ -4,12 +4,12 @@ import { useEffect, useReducer, useRef, useState } from 'react';
 import { ExternalLink, Bookmark, Share2, X } from 'lucide-react';
 import { getCategory } from '@/lib/categories';
 import { safeImageUrl } from '@/lib/freshness';
-import { galleryImages, pickDescription, sourceLine } from '@/lib/storyView';
+import { galleryImages, pickDescription, relativeTime, resolveSlugs, sourceLine, uniqueSourceNames } from '@/lib/storyView';
 import {
   briefReducer, initialBriefState, interpretBriefResponse, shouldFetchBrief,
 } from '@/lib/storyModalState';
-import { isSavedId, toggleSavedStored } from '@/lib/savedArticles';
-import { relativeTime, resolveSlugs, type NewsArticle } from '@/components/NewsCard';
+import { SAVED_CHANGED_EVENT, isSavedId, toggleSavedStored } from '@/lib/savedArticles';
+import type { NewsArticle } from '@/components/NewsCard';
 
 interface Props {
   article: NewsArticle;
@@ -61,7 +61,12 @@ export default function StoryModal({ article, onClose }: Props) {
   }, [brief, article._id]);
 
   // Save / share
-  const [saved, setSaved] = useState(() => !!article.isSaved || isSavedId(article._id));
+  const [saved, setSaved] = useState(() => isSavedId(article._id));
+  useEffect(() => {
+    const sync = () => setSaved(isSavedId(article._id));
+    window.addEventListener(SAVED_CHANGED_EVENT, sync);
+    return () => window.removeEventListener(SAVED_CHANGED_EVENT, sync);
+  }, [article._id]);
   const share = () => {
     const url = safeImageUrl(article.url) ?? window.location.href;
     if (navigator.share) navigator.share({ title: article.title, url }).catch(() => {});
@@ -78,7 +83,7 @@ export default function StoryModal({ article, onClose }: Props) {
     ? article.sources
     : [{ name: article.source, url: article.url }];
   const { shown, extra } = sourceLine(all, article.source);
-  const fullList = shown.map((s) => s.name).join(', ') + (extra ? ` +${extra}` : '');
+  const fullList = uniqueSourceNames(all, article.source).join(', ');
 
   const iconBtn = 'p-2 rounded-md transition-all text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]';
 
@@ -91,6 +96,7 @@ export default function StoryModal({ article, onClose }: Props) {
         e.preventDefault();
         onClose();
       }}
+      onClose={onClose}
       onClick={(e) => {
         if (e.target === dialogRef.current) onClose();
       }}
@@ -250,7 +256,7 @@ export default function StoryModal({ article, onClose }: Props) {
             )}
             <button
               type="button"
-              onClick={() => setSaved(toggleSavedStored(article))}
+              onClick={() => toggleSavedStored(article)}
               aria-label={saved ? 'Remove bookmark' : 'Bookmark article'}
               aria-pressed={saved}
               className={`${iconBtn} ${saved ? '!text-[var(--accent-brand)]' : ''}`}

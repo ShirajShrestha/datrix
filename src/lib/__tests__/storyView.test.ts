@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { pickDescription, sourceLine, galleryImages } from '../storyView';
+import { pickDescription, sourceLine, galleryImages, uniqueSourceNames, resolveSlugs } from '../storyView';
 
 describe('pickDescription', () => {
   const long = 'x'.repeat(40);
@@ -48,5 +48,15 @@ describe('galleryImages', () => {
   });
   it('tolerates undefined', () => {
     expect(galleryImages({})).toEqual([]);
+  });
+});
+
+describe('uniqueSourceNames / resolveSlugs', () => {
+  it('returns full deduped list, primary first', () => {
+    const src = ['A','B','A','C','D','E','F'].map((n) => ({ name: n, url: 'https://x.com' }));
+    expect(uniqueSourceNames(src, 'C')).toEqual(['C','A','B','D','E','F']);
+  });
+  it('tolerates malformed categories', () => {
+    expect(resolveSlugs({ categories: [null, 5, 'ai'], category: 'ai' })).toEqual(['ai']);
   });
 });

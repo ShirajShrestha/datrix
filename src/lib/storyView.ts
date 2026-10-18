@@ -1,3 +1,5 @@
+import { formatDistanceToNow } from 'date-fns';
+import { normalizeSlug } from '@/lib/categories';
 import { safeImageUrl } from '@/lib/freshness';
 
 export interface StorySource {
@@ -41,4 +43,34 @@ export function galleryImages(a: { imageUrl?: string; images?: string[] }): stri
     if (out.length >= 5) break;
   }
   return out;
+}
+
+/** Registry slugs for an article, tolerant of legacy/malformed data. */
+export function resolveSlugs(article: { categories?: unknown; category?: unknown }): string[] {
+  const raw: unknown[] = [
+    ...(Array.isArray(article.categories) ? article.categories : []),
+    article.category,
+  ];
+  const out: string[] = [];
+  for (const r of raw) {
+    if (typeof r !== 'string') continue;
+    const slug = normalizeSlug(r);
+    if (slug && !out.includes(slug)) out.push(slug);
+  }
+  return out;
+}
+
+export function relativeTime(value: string | Date): string | null {
+  const d = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(d.getTime())) return null;
+  try {
+    return formatDistanceToNow(d, { addSuffix: true });
+  } catch {
+    return null;
+  }
+}
+
+/** Unique outlet names in order (primary first), for the full-list tooltip. */
+export function uniqueSourceNames(sources: StorySource[], primary: string): string[] {
+  return sourceLine(sources, primary, Number.MAX_SAFE_INTEGER).shown.map((s) => s.name);
 }

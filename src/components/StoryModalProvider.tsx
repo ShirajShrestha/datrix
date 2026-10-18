@@ -1,10 +1,10 @@
 'use client';
 
 import { createContext, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import type { NewsArticle } from '@/components/NewsCard';
 import StoryModal from '@/components/StoryModal';
-import { buildStoryHref, isObjectId } from '@/lib/storyModalState';
+import { buildStoryHref, closeAction, isObjectId } from '@/lib/storyModalState';
 import { readSaved } from '@/lib/savedArticles';
 
 export interface StoryModalApi {
@@ -33,7 +33,6 @@ function StoryUrlSync({ onChange }: { onChange: (id: string | null) => void }) {
 }
 
 export function StoryModalProvider({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
   const [article, setArticle] = useState<NewsArticle | null>(null);
   const articleRef = useRef<NewsArticle | null>(null);
   const pushedRef = useRef(false);
@@ -44,37 +43,58 @@ export function StoryModalProvider({ children }: { children: React.ReactNode }) 
     setArticle(a);
   }, []);
 
+  const pushedIdRef = useRef<string | null>(null);
+  const closingRef = useRef(false);
+
   const removeParam = useCallback(() => {
-    router.replace(buildStoryHref(window.location.pathname, window.location.search, null), { scroll: false });
-  }, [router]);
+    window.history.replaceState(
+      window.history.state,
+      '',
+      buildStoryHref(window.location.pathname, window.location.search, null),
+    );
+  }, []);
 
   const openStory = useCallback(
     (a: NewsArticle) => {
       if (!a || typeof a._id !== 'string' || !a._id) return;
       show(a);
       pushedRef.current = true;
-      router.push(buildStoryHref(window.location.pathname, window.location.search, a._id), { scroll: false });
+      pushedIdRef.current = a._id;
+      closingRef.current = false;
+      window.history.pushState(
+        null,
+        '',
+        buildStoryHref(window.location.pathname, window.location.search, a._id),
+      );
     },
-    [router, show],
+    [show],
   );
 
   const closeStory = useCallback(() => {
-    const wasPushed = pushedRef.current;
+    if (closingRef.current) return;
+    const action = closeAction(pushedRef.current, pushedIdRef.current, window.location.search);
     pushedRef.current = false;
-    show(null);
-    if (wasPushed) router.back();
-    else if (new URLSearchParams(window.location.search).has('story')) removeParam();
-  }, [router, show, removeParam]);
+    pushedIdRef.current = null;
+    if (articleRef.current) show(null);
+    if (action === 'back') {
+      closingRef.current = true;
+      window.history.back();
+    } else if (action === 'strip') {
+      removeParam();
+    }
+  }, [show, removeParam]);
 
   const onUrlChange = useCallback(
     (id: string | null) => {
       const req = ++reqRef.current;
       if (!id) {
         pushedRef.current = false;
+        pushedIdRef.current = null;
+        closingRef.current = false;
         if (articleRef.current) show(null);
         return;
       }
-      if (articleRef.current?._id === id) return;
+      if (closingRef.current || articleRef.current?._id === id) return;
       // Snapshot first (saved articles), else fetch real ids.
       const snap = readSaved<NewsArticle>().find((a) => a._id === id);
       if (snap && !isObjectId(id)) {

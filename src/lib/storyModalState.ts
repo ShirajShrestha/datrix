@@ -25,6 +25,17 @@ export function readStoryParam(search: string): string | null {
   return v && v.length <= 64 ? v : null;
 }
 
+/** How to close: 'back' only if the current URL still holds the story entry we pushed. */
+export function closeAction(
+  pushed: boolean,
+  pushedId: string | null,
+  search: string,
+): 'back' | 'strip' | 'none' {
+  const current = readStoryParam(search);
+  if (current === null) return 'none';
+  return pushed && pushedId !== null && current === pushedId ? 'back' : 'strip';
+}
+
 export type BriefState =
   | { status: 'loading' }
   | { status: 'ready'; brief: BriefData }

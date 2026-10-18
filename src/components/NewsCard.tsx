@@ -1,11 +1,11 @@
 'use client';
 
-import { useState } from 'react';
-import { formatDistanceToNow } from 'date-fns';
-import { CATEGORIES, getCategory, normalizeSlug } from '@/lib/categories';
+import { useEffect, useState } from 'react';
+import { CATEGORIES, getCategory } from '@/lib/categories';
 import { usePreviousVisit } from '@/lib/prefs';
 import { isNewSince, safeImageUrl } from '@/lib/freshness';
-import { pickDescription } from '@/lib/storyView';
+import { pickDescription, relativeTime, resolveSlugs } from '@/lib/storyView';
+import { SAVED_CHANGED_EVENT, isSavedId, notifySavedChanged } from '@/lib/savedArticles';
 import { useStoryModal } from '@/components/StoryModalProvider';
 import { Bookmark, Share2 } from 'lucide-react';
 
@@ -55,31 +55,6 @@ for (const c of CATEGORIES) {
 
 const defaultCategory: CatStyle = { border: 'var(--border-highlight)', text: 'var(--text-muted)', bg: 'transparent', dot: 'var(--text-muted)', tint: 'transparent' };
 
-/** Registry slugs for an article, tolerant of legacy/malformed data. */
-export function resolveSlugs(article: NewsArticle): string[] {
-  const raw: unknown[] = [
-    ...(Array.isArray(article.categories) ? article.categories : []),
-    article.category,
-  ];
-  const out: string[] = [];
-  for (const r of raw) {
-    if (typeof r !== 'string') continue;
-    const slug = normalizeSlug(r);
-    if (slug && !out.includes(slug)) out.push(slug);
-  }
-  return out;
-}
-
-export function relativeTime(value: string | Date): string | null {
-  const d = value instanceof Date ? value : new Date(value);
-  if (!Number.isFinite(d.getTime())) return null;
-  try {
-    return formatDistanceToNow(d, { addSuffix: true });
-  } catch {
-    return null;
-  }
-}
-
 export default function NewsCard({ article, onSave }: NewsCardProps) {
   const [isSaved, setIsSaved] = useState(article.isSaved || false);
   const [bookmarkAnimating, setBookmarkAnimating] = useState(false);
@@ -105,11 +80,19 @@ export default function NewsCard({ article, onSave }: NewsCardProps) {
 
   const description = pickDescription(article);
 
+  useEffect(() => {
+    const sync = () => setIsSaved(isSavedId(article._id));
+    sync();
+    window.addEventListener(SAVED_CHANGED_EVENT, sync);
+    return () => window.removeEventListener(SAVED_CHANGED_EVENT, sync);
+  }, [article._id]);
+
   const handleSave = () => {
     setIsSaved(!isSaved);
     setBookmarkAnimating(true);
     setTimeout(() => setBookmarkAnimating(false), 300);
     onSave?.(article);
+    notifySavedChanged();
   };
 
   const handleShare = () => {
