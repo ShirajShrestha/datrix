@@ -1,7 +1,7 @@
 import type { Prefs } from '@/lib/prefs';
 import { effectiveCategories } from '@/lib/prefs';
 
-export type PushStatus = 'ok' | 'denied' | 'unsupported' | 'needs-install' | 'error' | 'limit';
+export type PushStatus = 'ok' | 'denied' | 'dismissed' | 'unsupported' | 'needs-install' | 'error' | 'limit';
 
 export interface SubscribeBody {
   subscription: { endpoint: string; keys: { p256dh: string; auth: string } };
@@ -61,6 +61,31 @@ export function testResultFromResponse(httpStatus: number): 'sent' | 'cooldown' 
   return 'error';
 }
 
+/** Monotonic epoch: work started under an older epoch must not touch the server. */
+export function createEpochGuard() {
+  let epoch = 0;
+  return {
+    bump: () => ++epoch,
+    token: () => epoch,
+    isCurrent: (t: number) => t === epoch,
+  };
+}
+
+export function syncSignature(prefs: Pick<Prefs, 'categories' | 'notifyTime'>): string {
+  return `${effectiveCategories(prefs as Prefs).join(',')}|${prefs.notifyTime}`;
+}
+
+const guard = createEpochGuard();
+let lastSynced: string | null = null;
+
+function announceChange() {
+  try {
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('datrix:push-changed'));
+  } catch {
+    /* ignore */
+  }
+}
+
 export function currentTimeZone(): string {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
@@ -107,13 +132,18 @@ function vapidKey(): string | null {
 }
 
 async function getRegistration(timeoutMs = 5000): Promise<ServiceWorkerRegistration | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       navigator.serviceWorker.ready,
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), timeoutMs);
+      }),
     ]);
   } catch {
     return null;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 
@@ -148,6 +178,8 @@ async function ensureSubscription(reg: ServiceWorkerRegistration, key: Uint8Arra
   const existing = await reg.pushManager.getSubscription();
   if (existing) {
     if (sameKey(existing.options?.applicationServerKey, key)) return { sub: existing, created: false };
+    // Key changed: tell the server to forget the old endpoint (best effort).
+    await postJson('/api/push/unsubscribe', { endpoint: existing.endpoint }).catch(() => 0);
     await existing.unsubscribe();
   }
   const sub = await reg.pushManager.subscribe({
@@ -158,6 +190,7 @@ async function ensureSubscription(reg: ServiceWorkerRegistration, key: Uint8Arra
 }
 
 export async function enablePush(prefs: Prefs): Promise<PushStatus> {
+  guard.bump();
   try {
     const support = getPushSupport();
     if (support !== 'ok') return support;
@@ -165,6 +198,7 @@ export async function enablePush(prefs: Prefs): Promise<PushStatus> {
     if (!k) return 'unsupported';
 
     const permission = Notification.permission === 'default' ? await Notification.requestPermission() : Notification.permission;
+    if (permission === 'default') return 'dismissed';
     if (permission !== 'granted') return 'denied';
 
     const reg = await getRegistration();
@@ -180,7 +214,10 @@ export async function enablePush(prefs: Prefs): Promise<PushStatus> {
     if (status !== 'ok') {
       // Roll back so the browser and server stay consistent.
       if (created) await sub.unsubscribe().catch(() => false);
+    } else {
+      lastSynced = syncSignature(prefs);
     }
+    announceChange();
     return status;
   } catch {
     return 'error';
@@ -188,6 +225,8 @@ export async function enablePush(prefs: Prefs): Promise<PushStatus> {
 }
 
 export async function disablePush(): Promise<void> {
+  guard.bump();
+  lastSynced = null;
   try {
     if (getPushSupport() === 'unsupported' || typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
     const reg = await getRegistration(2000);
@@ -198,6 +237,8 @@ export async function disablePush(): Promise<void> {
     await postJson('/api/push/unsubscribe', { endpoint }).catch(() => 0);
   } catch {
     /* swallow */
+  } finally {
+    announceChange();
   }
 }
 
@@ -211,7 +252,9 @@ export async function hasPushSubscription(): Promise<boolean> {
   }
 }
 
-export async function syncPush(prefs: Prefs): Promise<PushStatus> {
+export async function syncPush(prefs: Prefs, shouldContinue: () => boolean = () => true): Promise<PushStatus> {
+  const token = guard.token();
+  const stale = () => !guard.isCurrent(token) || !shouldContinue();
   try {
     const support = getPushSupport();
     if (support !== 'ok') return support;
@@ -219,14 +262,27 @@ export async function syncPush(prefs: Prefs): Promise<PushStatus> {
     const reg = await getRegistration();
     if (!reg) return 'unsupported';
     const existing = await reg.pushManager.getSubscription();
-    if (existing) return await postSubscription(existing, prefs);
+    if (stale()) return 'ok';
+    const sig = syncSignature(prefs);
+    if (existing) {
+      if (lastSynced === sig) return 'ok';
+      const status = await postSubscription(existing, prefs);
+      if (status === 'ok') lastSynced = sig;
+      return status;
+    }
     if (!prefs.notifyEnabled) return 'ok';
     const k = vapidKey();
     if (!k) return 'unsupported';
     // Permission is already granted, so this will not prompt.
     const { sub } = await ensureSubscription(reg, urlBase64ToUint8Array(k));
+    if (stale()) {
+      await sub.unsubscribe().catch(() => false);
+      return 'ok';
+    }
     const status = await postSubscription(sub, prefs).catch(() => 'error' as PushStatus);
     if (status !== 'ok') await sub.unsubscribe().catch(() => false);
+    else lastSynced = sig;
+    announceChange();
     return status;
   } catch {
     return 'error';

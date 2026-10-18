@@ -194,8 +194,9 @@ const DEFAULT_PUSH_BODY = 'Fresh stories are ready.';
 
 // Only same-origin relative paths; anything else falls back to '/'.
 function safeNotificationUrl(url) {
-  if (typeof url !== 'string' || url.length > 2048) return '/';
-  if (!url.startsWith('/') || url.startsWith('//') || url.startsWith('/\\')) return '/';
+  if (typeof url !== 'string' || url.length === 0 || url.length > 500) return '/';
+  if (/[\u0000-\u001f\u007f\\]/.test(url)) return '/';
+  if (!url.startsWith('/') || url.startsWith('//')) return '/';
   return url;
 }
 
@@ -217,20 +218,27 @@ function parsePushData(text) {
 }
 
 async function handleNotificationClick(rawUrl) {
-  const url = safeNotificationUrl(rawUrl);
-  const target = new URL(url, self.location.origin).href;
+  let target = new URL('/', self.location.origin).href;
+  try {
+    const resolved = new URL(safeNotificationUrl(rawUrl), self.location.origin);
+    if (resolved.origin === self.location.origin) target = resolved.href; // defense in depth
+  } catch {}
   const list = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
   for (const client of list) {
     let sameOrigin = false;
     try { sameOrigin = new URL(client.url).origin === self.location.origin; } catch {}
     if (!sameOrigin) continue;
+    let handled = false;
     try {
       if (client.url !== target && typeof client.navigate === 'function') {
         const navigated = await client.navigate(target);
-        if (navigated && navigated.focus) return await navigated.focus();
+        if (navigated && navigated.focus) { await navigated.focus(); handled = true; }
       }
-      return await client.focus();
     } catch {}
+    try {
+      if (!handled) { await client.focus(); handled = true; }
+    } catch {}
+    if (handled) return;
   }
   return self.clients.openWindow(target);
 }

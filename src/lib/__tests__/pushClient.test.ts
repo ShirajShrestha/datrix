@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  urlBase64ToUint8Array, detectPushSupport, buildSubscribeBody, statusFromResponse, testResultFromResponse, currentTimeZone,
+  urlBase64ToUint8Array, detectPushSupport, buildSubscribeBody, createEpochGuard, syncSignature, statusFromResponse, testResultFromResponse, currentTimeZone,
 } from "../pushClient";
 
 const ok = { hasServiceWorker: true, hasPushManager: true, hasNotification: true, isIOS: false, isStandalone: false };
@@ -55,4 +55,19 @@ describe("status mapping", () => {
     expect(testResultFromResponse(502)).toBe("error");
   });
   it("time zone is a non-empty string", () => expect(currentTimeZone().length).toBeGreaterThan(0));
+});
+
+describe("epoch guard", () => {
+  it("invalidates older tokens after bump", () => {
+    const g = createEpochGuard();
+    const t = g.token();
+    expect(g.isCurrent(t)).toBe(true);
+    g.bump();
+    expect(g.isCurrent(t)).toBe(false);
+    expect(g.isCurrent(g.token())).toBe(true);
+  });
+  it("syncSignature reflects categories and time", () => {
+    expect(syncSignature({ categories: ["ai"], notifyTime: "08:00" })).toBe("ai|08:00");
+    expect(syncSignature({ categories: ["ai"], notifyTime: "09:00" })).not.toBe("ai|08:00");
+  });
 });

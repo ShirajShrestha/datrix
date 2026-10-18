@@ -21,7 +21,7 @@ export default function PushSync() {
     if (!hydrated || !notifyEnabled) return;
     const t = setTimeout(
       () => {
-        syncPush(prefsRef.current).then((status) => {
+        syncPush(prefsRef.current, () => prefsRef.current.notifyEnabled).then((status) => {
           if (status === "denied") setPrefs({ notifyEnabled: false });
         });
       },

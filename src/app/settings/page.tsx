@@ -72,6 +72,7 @@ function ClearSaved() {
 
 
 const STATUS_MESSAGES: Record<Exclude<PushStatus, 'ok'>, string> = {
+  dismissed: 'Permission request was dismissed. Tap enable to try again.',
   denied: 'Notifications are blocked in your browser settings',
   unsupported: "This browser or build doesn't support push notifications",
   'needs-install':
@@ -97,13 +98,18 @@ function NotificationsSection() {
   useEffect(() => {
     if (!hydrated) return;
     let alive = true;
-    if (prefs.notifyEnabled) {
+    const refresh = () => {
       hasPushSubscription().then((v) => {
         if (alive) setSubscribed(v);
       });
-    }
+    };
+    if (prefs.notifyEnabled) refresh();
+    window.addEventListener('datrix:push-changed', refresh);
+    window.addEventListener('focus', refresh);
     return () => {
       alive = false;
+      window.removeEventListener('datrix:push-changed', refresh);
+      window.removeEventListener('focus', refresh);
     };
   }, [hydrated, prefs.notifyEnabled]);
 

@@ -140,7 +140,8 @@ describe("sw push", () => {
   });
   it("safeNotificationUrl only allows same-origin relative paths", () => {
     expect(sw.safeNotificationUrl("/category/ai")).toBe("/category/ai");
-    for (const bad of ["//evil.com", "https://evil.com", "javascript:alert(1)", "/\\evil.com", "", undefined, 5]) {
+    expect(sw.safeNotificationUrl("/category/ai?x=1")).toBe("/category/ai?x=1");
+    for (const bad of ["/\t/evil.com", "/\n/evil.com", "/\r/evil.com", "//evil.com", "https://evil.com", "javascript:alert(1)", "data:text/html,x", "/\\evil.com", "/" + "a".repeat(600), "", undefined, 5]) {
       expect(sw.safeNotificationUrl(bad)).toBe("/");
     }
   });
@@ -175,6 +176,38 @@ describe("sw push", () => {
     await Promise.all(e2.pending);
     expect(closed).toBe(true);
     expect(focused).toEqual([ORIGIN + "/"]);
+    expect(opened).toEqual([]);
+  });
+});
+
+describe("sw notification click", () => {
+  function setup(clients: any[]) {
+    const opened: string[] = [];
+    const self: any = {
+      location: { origin: ORIGIN },
+      addEventListener() {},
+      clients: { matchAll: async () => clients, openWindow: async (u: string) => { opened.push(u); }, claim: async () => {} },
+    };
+    const sandbox: any = { self, caches: makeCaches(), fetch: async () => {}, Response, Request, Headers, URL, Date };
+    vm.createContext(sandbox);
+    vm.runInContext(src, sandbox);
+    return { sw: self.__datrixSw, opened };
+  }
+  it("opens a window when no client exists", async () => {
+    const { sw, opened } = setup([]);
+    await sw.handleNotificationClick("/category/ai");
+    expect(opened).toEqual([ORIGIN + "/category/ai"]);
+  });
+  it("opens '/' for a smuggled cross-origin url", async () => {
+    const { sw, opened } = setup([]);
+    await sw.handleNotificationClick("/\t/evil.com");
+    expect(opened).toEqual([ORIGIN + "/"]);
+  });
+  it("focuses and does not open a duplicate when navigate rejects", async () => {
+    let focused = 0;
+    const { sw, opened } = setup([{ url: ORIGIN + "/x", navigate: async () => { throw new Error("no"); }, focus: async () => { focused++; } }]);
+    await sw.handleNotificationClick("/");
+    expect(focused).toBe(1);
     expect(opened).toEqual([]);
   });
 });
