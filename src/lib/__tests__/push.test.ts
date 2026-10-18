@@ -64,6 +64,17 @@ describe('buildPayload', () => {
     const p = buildPayload([a('Hi\u0000\n<b>there</b>\u0007')]);
     expect(p.body).toBe('Hi bthere/b');
   });
+  it('strips bidi/invisible chars', () => {
+    expect(buildPayload([a('a\u202Eb\u200Bc\uFEFFd\u2066e')]).body).toBe('abcde');
+  });
+  it('ignores non-string titles', () => {
+    expect(buildPayload([{ title: 5 as unknown as string }, a('ok')]).body).toBe('ok');
+  });
+  it('does not split emoji at truncation boundary', () => {
+    const p = buildPayload([a('x'.repeat(88) + '😀😀😀')]);
+    expect(p.body).toBe('x'.repeat(88) + '😀…');
+    expect(p.body).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/);
+  });
   it('body <= 240', () => {
     expect(buildPayload(Array.from({ length: 20 }, () => a('y'.repeat(200))), 20).body.length).toBeLessThanOrEqual(240);
   });
@@ -86,12 +97,43 @@ describe('sendToSub', () => {
     const sender = vi.fn().mockResolvedValue({});
     expect(await sendToSub(sub, { a: 1 }, { sender })).toBe('sent');
     expect(sender).toHaveBeenCalledOnce();
-    expect(sender.mock.calls[0][2]).toMatchObject({ TTL: 21600, urgency: 'normal' });
+    expect(sender.mock.calls[0][2]).toMatchObject({ TTL: 21600, urgency: 'normal', timeout: 10000 });
   });
   it.each([[410, 'gone'], [404, 'gone'], [500, 'error']])('status %i -> %s', async (statusCode, out) => {
     setEnv();
     const sender = vi.fn().mockRejectedValue({ statusCode });
     expect(await sendToSub(sub, {}, { sender })).toBe(out);
+  });
+  it('timeout error (no statusCode) -> error', async () => {
+    setEnv();
+    expect(await sendToSub(sub, {}, { sender: vi.fn().mockRejectedValue(new Error('timeout')) })).toBe('error');
+  });
+  it('null rejection -> error', async () => {
+    setEnv();
+    expect(await sendToSub(sub, {}, { sender: vi.fn().mockRejectedValue(null) })).toBe('error');
+  });
+  it('error warn never leaks endpoint/keys/message', async () => {
+    setEnv();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const e = Object.assign(new Error(sub.endpoint + ' p a'), { statusCode: 500 });
+    await sendToSub(sub, { secret: 'payload' }, { sender: vi.fn().mockRejectedValue(e) });
+    const out = JSON.stringify(warn.mock.calls);
+    expect(out).toContain('500');
+    expect(out).not.toContain('push.test');
+    expect(out).not.toContain('payload');
+    warn.mockRestore();
+  });
+  it('invalid VAPID keys warn only once', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubEnv('VAPID_SUBJECT', 'mailto:t@example.com');
+    vi.stubEnv('VAPID_PUBLIC_KEY', 'bad');
+    vi.stubEnv('VAPID_PRIVATE_KEY', 'bad');
+    const sender = vi.fn();
+    expect(await sendToSub(sub, {}, { sender })).toBe('error');
+    expect(await sendToSub(sub, {}, { sender })).toBe('error');
+    expect(sender).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
   });
   it('missing env -> error, sender not called, warns names only', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -114,6 +156,13 @@ describe('PushSub schema', () => {
   it('accepts valid and empty categories', () => {
     expect(new PushSub(valid()).validateSync()).toBeUndefined();
     expect(new PushSub({ ...valid(), categories: [] }).validateSync()).toBeUndefined();
+  });
+  it('declares unique endpoint index', () => {
+    const idx = PushSub.schema.indexes() as [Record<string, number>, Record<string, unknown>][];
+    expect(idx.some(([f, o]) => f.endpoint === 1 && o.unique === true)).toBe(true);
+  });
+  it('rejects non-padded lastSentDate', () => {
+    expect(new PushSub({ ...valid(), lastSentDate: '2026-1-1' }).validateSync()?.errors.lastSentDate).toBeDefined();
   });
   it('rejects bad time / timeZone / category', () => {
     expect(new PushSub({ ...valid(), time: '7:5' }).validateSync()?.errors.time).toBeDefined();

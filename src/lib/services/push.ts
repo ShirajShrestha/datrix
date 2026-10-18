@@ -28,6 +28,8 @@ export function localParts(now: Date, timeZone: string): { date: string; minutes
   }
 }
 
+// Note: the window does not wrap past local midnight. A preference at 23:00 is only due
+// until 23:59 local because lastSentDate is keyed to the local date; wrapping would risk double sends.
 export function isDue(
   sub: { time: string; timeZone: string; lastSentDate?: string },
   now: Date,
@@ -49,10 +51,12 @@ function cleanHeadline(s: string): string {
   const t = s
     // eslint-disable-next-line no-control-regex
     .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+    .replace(/[\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g, '')
     .replace(/[<>]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
-  return t.length > 90 ? t.slice(0, 89).trimEnd() + '…' : t;
+  const cps = Array.from(t);
+  return cps.length > 90 ? cps.slice(0, 89).join('').trimEnd() + '…' : t;
 }
 
 export function buildPayload(
@@ -64,19 +68,29 @@ export function buildPayload(
     .filter(Boolean)
     .slice(0, Math.max(0, count));
   let body = heads.length ? heads.join(' • ') : 'Fresh stories are ready.';
-  if (body.length > 240) body = body.slice(0, 239).trimEnd() + '…';
+  if (body.length > 240) {
+    const cps = Array.from(body);
+    body = cps.length > 240 ? cps.slice(0, 239).join('').trimEnd() + '…' : body;
+    while (body.length > 240) body = Array.from(body).slice(0, -2).join('') + '…';
+  }
   return { title: 'Datrix - Your morning briefing', body, url: '/' };
 }
 
-let vapidReady: boolean | null = null;
+let vapidReady = false;
+let vapidWarned = false;
+
+function warnOnce(msg: string): void {
+  if (vapidWarned) return;
+  vapidWarned = true;
+  console.warn(msg);
+}
 
 function ensureVapid(): boolean {
   if (vapidReady) return true;
   const names = ['VAPID_SUBJECT', 'VAPID_PUBLIC_KEY', 'VAPID_PRIVATE_KEY'];
   const missing = names.filter((n) => !process.env[n]);
   if (missing.length) {
-    if (vapidReady === null) console.warn(`Push disabled: missing env ${missing.join(', ')}`);
-    vapidReady = null === vapidReady ? false : vapidReady;
+    warnOnce(`Push disabled: missing env ${missing.join(', ')}`);
     return false;
   }
   try {
@@ -88,15 +102,15 @@ function ensureVapid(): boolean {
     vapidReady = true;
     return true;
   } catch {
-    console.warn('Push disabled: invalid VAPID configuration');
-    vapidReady = false;
+    warnOnce('Push disabled: invalid VAPID configuration');
     return false;
   }
 }
 
 /** Test hook: forget cached VAPID state. */
 export function _resetVapidForTests(): void {
-  vapidReady = null;
+  vapidReady = false;
+  vapidWarned = false;
 }
 
 export async function sendToSub(
@@ -110,11 +124,15 @@ export async function sendToSub(
     await sender(
       { endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth } },
       JSON.stringify(payload),
-      { TTL: 6 * 60 * 60, urgency: 'normal' },
+      { TTL: 6 * 60 * 60, urgency: 'normal', timeout: 10_000 },
     );
     return 'sent';
   } catch (e) {
-    const status = (e as { statusCode?: number } | null)?.statusCode;
-    return status === 404 || status === 410 ? 'gone' : 'error';
+    const err = e as { statusCode?: unknown; name?: unknown } | null;
+    const status = err?.statusCode;
+    if (status === 404 || status === 410) return 'gone';
+    const tag = typeof status === 'number' ? `status ${status}` : typeof err?.name === 'string' ? err.name : 'unknown';
+    console.warn(`Push send failed: ${tag}`);
+    return 'error';
   }
 }
