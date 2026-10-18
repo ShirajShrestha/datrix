@@ -198,3 +198,28 @@ describe('providers (stubbed fetch)', () => {
     }
   });
 });
+
+describe('summarizeBatch failures', () => {
+  const items = mkItems(2);
+  it('records coarse, de-duplicated provider failures', async () => {
+    const A: SummaryProvider = async () => { throw new ProviderHttpError('groq', 500); };
+    const B: SummaryProvider = async () => { throw Object.assign(new Error('secret https://k?key=ABC'), { name: 'TimeoutError' }); };
+    const r = await summarizeBatch(mkItems(20), [A, B], { concurrency: 1 });
+    expect(r.failures.sort()).toEqual(['summarizer:gemini:timeout', 'summarizer:groq:500']);
+    expect(JSON.stringify(r.failures)).not.toMatch(/secret|http|key=/i);
+  });
+  it('429 and parse failures', async () => {
+    const A: SummaryProvider = async () => { throw new ProviderHttpError('groq', 429); };
+    const B: SummaryProvider = async () => new Map();
+    const r = await summarizeBatch(items, [A, B]);
+    expect(r.failures.sort()).toEqual(['summarizer:gemini:parse', 'summarizer:groq:429']);
+  });
+  it('unknown error -> error token; missing key and success record nothing', async () => {
+    const A: SummaryProvider = async () => { throw new Error('boom'); };
+    expect((await summarizeBatch(items, [A])).failures).toEqual(['summarizer:groq:error']);
+    const M: SummaryProvider = async () => { throw new MissingKeyError('groq'); };
+    expect((await summarizeBatch(items, [M])).failures).toEqual([]);
+    const OK: SummaryProvider = async (b) => new Map(b.map((x) => [x.url, sum('t')]));
+    expect((await summarizeBatch(items, [OK])).failures).toEqual([]);
+  });
+});

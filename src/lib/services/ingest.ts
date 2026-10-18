@@ -8,7 +8,35 @@ import { Article } from '@/lib/models/Article';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const POOL_PER_CATEGORY = 25;
-export const INGEST_BUDGET_MS = 50_000;
+// Route maxDuration is 120 s; stop starting new work after 100 s.
+export const INGEST_BUDGET_MS = 100_000;
+export const SOURCE_FETCH_DEADLINE_MS = 35_000;
+const SOURCE_FETCH_RESERVE_MS = 20_000;
+
+/** Fetch-phase deadline: min(35 s, remaining budget - 20 s), never negative. */
+export function planFetchDeadline(elapsedMs: number, budgetMs: number = INGEST_BUDGET_MS): number {
+  return Math.max(0, Math.min(SOURCE_FETCH_DEADLINE_MS, budgetMs - elapsedMs - SOURCE_FETCH_RESERVE_MS));
+}
+
+function isHttpUrl(u: unknown): u is string {
+  if (typeof u !== 'string') return false;
+  try {
+    const p = new URL(u).protocol;
+    return p === 'http:' || p === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Drops articles whose own url is not http(s), and `sources[]` entries with non-http(s) urls.
+ * An article left with no valid source gets one built from its own name/url.
+ */
+export function sanitizeArticleUrls<T extends { url: string; source: string; sources: { name: string; url: string }[] }>(a: T): T | null {
+  if (!isHttpUrl(a.url)) return null;
+  const sources = (Array.isArray(a.sources) ? a.sources : []).filter((s) => s && isHttpUrl(s.url));
+  return { ...a, sources: sources.length ? sources : [{ name: a.source, url: a.url }] };
+}
 const IMAGE_MIN_REMAINING_MS = 12_000;
 const WRITE_RESERVE_MS = 8_000;
 const SUMMARY_WRITE_RESERVE_MS = 6_000;
@@ -59,6 +87,8 @@ export function buildOps(
       sources: a.sources,
       publishedAt,
       expireAt: computeExpireAt(publishedAt, now),
+      // Explicit so the push recency guard (updatedAt within 24 h) sees every daily re-upsert.
+      updatedAt: now,
     };
     if (a.imageUrl) $set.imageUrl = a.imageUrl;
     const summary = summaries.get(a.url);
@@ -150,7 +180,7 @@ async function summarizeNew(
   items: ScoredArticle[],
   deadlineAt: number,
   now: () => number,
-): Promise<{ summaries: Map<string, StoredSummary>; llmCalls: number }> {
+): Promise<{ summaries: Map<string, StoredSummary>; llmCalls: number; failures: string[] }> {
   const inputs = items.map((a) => ({ url: a.url, title: a.title, description: a.description }));
   return summarizeBatch(inputs, undefined, { deadlineAt, now });
 }
@@ -178,7 +208,7 @@ export async function runIngest(opts: { clock?: () => number } = {}): Promise<In
   const now = new Date();
   await connectToDatabase();
 
-  const { articles: raw, failures: sourceFailures } = await fetchAllSources();
+  const { articles: raw, failures: sourceFailures } = await fetchAllSources({ deadlineMs: planFetchDeadline(0) });
   const failures = [...sourceFailures];
   const report: IngestReport = {
     fetched: raw.length, kept: 0, created: 0, updated: 0, summarized: 0, llmSummarized: 0, failures, llmCalls: 0,
@@ -210,7 +240,12 @@ export async function runIngest(opts: { clock?: () => number } = {}): Promise<In
 
   // Normalize categories and validate before touching the DB.
   const validated: ScoredArticle[] = [];
-  for (const a of withImages) {
+  for (const a0 of withImages) {
+    const a = sanitizeArticleUrls(a0);
+    if (!a) {
+      failures.push('invalid:url');
+      continue;
+    }
     const categories = cleanCategories(a.categories);
     if (categories.length === 0) continue;
     const candidate = { ...a, categories };
@@ -238,8 +273,9 @@ export async function runIngest(opts: { clock?: () => number } = {}): Promise<In
     { url: 1, summary: 1 },
   ).lean();
   const { needSummary, llmSummaryUrls } = selectNeedSummary(valid, existing);
-  const { summaries, llmCalls } = await summarizeNew(needSummary, startedAt + INGEST_BUDGET_MS - SUMMARY_WRITE_RESERVE_MS, clock);
+  const { summaries, llmCalls, failures: summarizerFailures } = await summarizeNew(needSummary, startedAt + INGEST_BUDGET_MS - SUMMARY_WRITE_RESERVE_MS, clock);
   report.llmCalls = llmCalls;
+  for (const f of summarizerFailures) if (!failures.includes(f)) failures.push(f);
   report.summarized = summaries.size;
   report.llmSummarized = [...summaries.values()].filter((x) => x.provider === 'groq' || x.provider === 'gemini').length;
 

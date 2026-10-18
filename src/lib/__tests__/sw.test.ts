@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import vm from "node:vm";
@@ -27,7 +27,7 @@ function makeCaches() {
 function load(fetchImpl: any = async () => { throw new Error("offline"); }) {
   const caches = makeCaches();
   const self: any = { location: { origin: ORIGIN }, addEventListener() {}, clients: { claim: async () => {} } };
-  const sandbox: any = { self, caches, fetch: fetchImpl, Response, Request, Headers, URL, Date };
+  const sandbox: any = { self, caches, fetch: fetchImpl, Response, Request, Headers, URL, Date, setTimeout: (f: any, ms: number) => globalThis.setTimeout(f, ms), clearTimeout: (t: any) => globalThis.clearTimeout(t) };
   vm.createContext(sandbox);
   vm.runInContext(src, sandbox);
   return { sw: self.__datrixSw, caches };
@@ -111,15 +111,74 @@ describe("sw legacy caches", () => {
   });
 });
 
-describe("sw SWR resilience", () => {
+describe("sw articles network-first", () => {
+  afterEach(() => vi.useRealTimers());
+  const HOUR = 3600_000;
+  async function seed(caches: any, sw: any, path: string, body: string, ageMs: number) {
+    const c = await caches.open(sw.ARTICLES_CACHE);
+    await c.put(req(path), new Response(body, { headers: { "x-sw-cached-at": String(Date.now() - ageMs) } }));
+  }
+
+  it("returns network response even when a fresh cache entry exists, and refreshes cache", async () => {
+    const { sw, caches } = load(async () => basic("NET", { headers: { "Cache-Control": "s-maxage=300" } }));
+    await seed(caches, sw, "/api/articles?x=1", "CACHED", 1000);
+    const e = ev(req("/api/articles?x=1"));
+    const res = await sw.networkFirstArticles(e);
+    expect(await res.text()).toBe("NET");
+    await Promise.all(e.pending);
+    const stored = await (await caches.open(sw.ARTICLES_CACHE)).match(req("/api/articles?x=1"));
+    expect(await stored!.text()).toBe("NET");
+  });
+
+  it("network failure -> cache if younger than 6h", async () => {
+    const { sw, caches } = load();
+    await seed(caches, sw, "/api/articles?x=1", "CACHED", 5 * HOUR);
+    const res = await sw.networkFirstArticles(ev(req("/api/articles?x=1")));
+    expect(await res.text()).toBe("CACHED");
+  });
+
+  it("network failure -> 503 JSON if cache older than 6h or absent", async () => {
+    const { sw, caches } = load();
+    await seed(caches, sw, "/api/articles?x=1", "OLD", 7 * HOUR);
+    const stale = await sw.networkFirstArticles(ev(req("/api/articles?x=1")));
+    expect(stale.status).toBe(503);
+    expect(await stale.json()).toEqual({ success: false, error: "offline" });
+    const absent = await sw.networkFirstArticles(ev(req("/api/articles?y=2")));
+    expect(absent.status).toBe(503);
+  });
+
+  it("5xx falls back to a fresh cache entry", async () => {
+    const { sw, caches } = load(async () => basic("boom", { status: 500 }));
+    await seed(caches, sw, "/api/articles", "CACHED", 1000);
+    expect(await (await sw.networkFirstArticles(ev(req("/api/articles")))).text()).toBe("CACHED");
+  });
+
+  it("timeout (3s) falls back to the cache", async () => {
+    vi.useFakeTimers();
+    const { sw, caches } = load(() => new Promise(() => {}));
+    await seed(caches, sw, "/api/articles?x=1", "CACHED", HOUR);
+    const p = sw.networkFirstArticles(ev(req("/api/articles?x=1")));
+    await vi.advanceTimersByTimeAsync(sw.ARTICLES_NETWORK_TIMEOUT_MS);
+    expect(await (await p).text()).toBe("CACHED");
+  });
+
   it("returns network response even if cache.put throws", async () => {
     const { sw, caches } = load(async () => basic('{"ok":1}', { headers: { "Cache-Control": "s-maxage=300" } }));
     const orig = caches.open;
     caches.open = async (n: string) => ({ ...(await orig(n)), put: async () => { throw new Error("quota"); } }) as any;
     const e = ev(req("/api/articles?x=1"));
-    const res = await sw.staleWhileRevalidateArticles(e);
+    const res = await sw.networkFirstArticles(e);
     expect(res.status).toBe(200);
     expect(await res.text()).toBe('{"ok":1}');
+    await Promise.all(e.pending);
+  });
+
+  it("does not cache no-store responses", async () => {
+    const { sw, caches } = load(async () => basic("NET", { headers: { "Cache-Control": "no-store" } }));
+    const e = ev(req("/api/articles?x=1"));
+    await sw.networkFirstArticles(e);
+    await Promise.all(e.pending);
+    expect(await (await caches.open(sw.ARTICLES_CACHE)).match(req("/api/articles?x=1"))).toBeUndefined();
   });
 });
 

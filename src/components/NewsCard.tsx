@@ -83,7 +83,8 @@ export default function NewsCard({ article, onSave }: NewsCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isSaved, setIsSaved] = useState(article.isSaved || false);
   const [bookmarkAnimating, setBookmarkAnimating] = useState(false);
-  const [imgFailed, setImgFailed] = useState(false);
+  // Track the URL that failed (not a boolean) so a changed imageUrl gets a fresh attempt.
+  const [failedImg, setFailedImg] = useState<string | null>(null);
   const previousVisit = usePreviousVisit();
   const panelId = useId();
 
@@ -96,7 +97,7 @@ export default function NewsCard({ article, onSave }: NewsCardProps) {
   const extraCount = Math.max(0, slugs.length - 2);
 
   const imageSrc = safeImageUrl(article.imageUrl);
-  const showImage = imageSrc !== null && !imgFailed;
+  const showImage = imageSrc !== null && failedImg !== imageSrc;
   const time = relativeTime(article.publishedAt);
   const isNew = isNewSince(article.publishedAt, previousVisit);
 
@@ -154,7 +155,7 @@ export default function NewsCard({ article, onSave }: NewsCardProps) {
                 referrerPolicy="no-referrer"
                 loading="lazy"
                 decoding="async"
-                onError={() => setImgFailed(true)}
+                onError={() => setFailedImg(imageSrc)}
                 className="absolute inset-0 w-full h-full object-cover"
               />
             ) : (
@@ -224,7 +225,7 @@ export default function NewsCard({ article, onSave }: NewsCardProps) {
             </div>
 
             <h3
-              className="font-serif"
+              className="font-serif break-words min-w-0"
               style={{
                 fontSize: 18,
                 fontWeight: 600,
@@ -238,7 +239,7 @@ export default function NewsCard({ article, onSave }: NewsCardProps) {
                 onClick={toggle}
                 aria-expanded={isExpanded}
                 aria-controls={panelId}
-                className="text-left cursor-pointer"
+                className="text-left cursor-pointer break-words min-w-0 max-w-full"
                 style={{ color: 'inherit', font: 'inherit' }}
               >
                 {article.title}
@@ -344,7 +345,7 @@ export default function NewsCard({ article, onSave }: NewsCardProps) {
                           href={l.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-[13px] hover:opacity-80 transition-opacity underline-offset-2 hover:underline"
+                          className="text-[13px] hover:opacity-80 transition-opacity underline-offset-2 hover:underline break-words min-w-0"
                           style={{ color: categoryStyle.text }}
                         >
                           {l.name}

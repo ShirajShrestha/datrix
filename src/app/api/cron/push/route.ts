@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/db';
-import { PushSub } from '@/lib/models/PushSub';
+import { PushSub, CONFIRMED_SUB_TTL_MS } from '@/lib/models/PushSub';
 import { Article } from '@/lib/models/Article';
 import { buildPayload, isDue, sendToSubDetailed, type SendResult } from '@/lib/services/push';
 import { categoriesKey, localDateFor, runWithConcurrency, SOFT_FAIL_STATUSES, MAX_SOFT_FAILS } from '@/lib/services/pushDispatch';
@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
     await connectToDatabase();
     const now = new Date();
 
-    const recent = await Article.exists({ createdAt: { $gte: new Date(now.getTime() - DAY_MS) } });
+    const recent = await Article.exists({ updatedAt: { $gte: new Date(now.getTime() - DAY_MS) } });
     if (!recent) return NextResponse.json({ success: true, skipped: 'no recent ingest' });
 
     const cache = new Map<string, Promise<Head[]>>();
@@ -96,7 +96,8 @@ export async function GET(request: NextRequest) {
           }
           if (r.result === 'sent') {
             sent++;
-            await PushSub.updateOne({ _id: item._id, failCount: { $gt: 0 } }, { $set: { failCount: 0 } }).catch(() => {});
+            // Delivered: reset failures and extend expiry (unconfirmed rows otherwise expire after 14 days).
+            await PushSub.updateOne({ _id: item._id }, { $set: { failCount: 0, expireAt: new Date(Date.now() + CONFIRMED_SUB_TTL_MS) } }).catch(() => {});
           } else if (r.result === 'gone') {
             gone++;
             await PushSub.deleteOne({ _id: item._id });

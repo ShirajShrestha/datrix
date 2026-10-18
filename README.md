@@ -33,10 +33,11 @@ Legacy slugs `tech` and `economy` are mapped to `technology` and `business`. An 
 
 ## Architecture
 
-- **Ingest pipeline** (`src/lib/services/ingest.ts`, `GET /api/cron/news`): fetch all sources in parallel (one failing source does not stop the run) -> score -> deduplicate (token-similarity within 48 h) -> keep the top 25 per category -> resolve missing images (at most 60 page fetches) -> summarize articles lacking an LLM summary (batches of 8 per call) -> bulk upsert into MongoDB. It works inside a 50 s time budget and returns an `IngestReport`.
+- **Ingest pipeline** (`src/lib/services/ingest.ts`, `GET /api/cron/news`): fetch all sources in parallel against a shared 35 s deadline (one failing or slow source does not stop the run; a slow one is reported as `timeout:<name>` in `failures`) -> score -> deduplicate (token-similarity within 48 h) -> keep the top 25 per category -> resolve missing images (at most 60 page fetches) -> summarize articles lacking an LLM summary (batches of 8 per call) -> bulk upsert into MongoDB. It works inside a 100 s time budget (route `maxDuration = 120`) and returns an `IngestReport`. Summarizer provider problems appear in `failures` as coarse entries such as `summarizer:groq:429` or `summarizer:gemini:timeout`. Articles whose url is not http(s) are dropped.
 - **Read API** (`GET /api/articles`): reads stored articles, filtered by the categories the client sends. `GET /api/cron/digest` also exists but is not scheduled. The browser never calls the news APIs.
 - **Device-only prefs**: categories, notify time and onboarding state are stored in `localStorage` (`datrix_prefs`). Saved articles use `newsintel_saved_articles`.
-- **Push subscriptions** (`/api/push/subscribe`, `/api/push/unsubscribe`, `/api/push/test`): a subscription is stored (at most `MAX_PUSH_SUBSCRIPTIONS`, default 2000; over the cap the API answers 503 "Subscription limit reached") with its categories, preferred time and IANA time zone. `GET /api/cron/push` sends to subscriptions that are due (their local time has reached the preferred time, within a 3 hour catch-up window, and nothing was sent yet today).
+- **Push subscriptions** (`/api/push/subscribe`, `/api/push/unsubscribe`, `/api/push/test`): a subscription is stored (at most `MAX_PUSH_SUBSCRIPTIONS`, default 2000; over the cap the API answers 503 "Subscription limit reached") with its categories, preferred time and IANA time zone. `GET /api/cron/push` sends to subscriptions that are due (their local time has reached the preferred time, within a 3 hour catch-up window, and nothing was sent yet today). Changing the notification time after today's push already went out, or subscribing after the chosen time has already passed today, skips today's push until tomorrow.
+- **Subscription expiry and abuse limits**: the three POST routes require a same-host `Origin` header (a request without one gets 403). A new subscription row expires after 14 days (TTL index on `PushSub.expireAt`) unless a push is actually delivered; a delivered push (daily cron or the test button) moves expiry to 90 days. Re-subscribing an existing endpoint never changes `expireAt`, so fake rows added by an attacker vanish after 14 days while real users, who get a push within a day, are kept. The `MAX_PUSH_SUBSCRIPTIONS` cap still applies. Rows created before this field existed have no `expireAt` and do not expire.
 - **Schedulers**: GitHub Actions only (`.github/workflows`). `vercel.json` has no crons.
 - **Service worker**: hand-written `public/sw.js` (runtime caching, offline page, push handling). It is not registered by `next dev`.
 
@@ -51,6 +52,7 @@ Copy `.env.example` to `.env.local`. Never commit real values.
 | `GUARDIAN_API_KEY` | Optional | Guardian Open Platform source. Source skipped if unset. |
 | `GNEWS_API_KEY` | Optional | GNews source. Skipped if unset. |
 | `MEDIASTACK_API_KEY` | Optional | MediaStack source. Skipped if unset. |
+| `MEDIASTACK_MAX_CALLS_PER_RUN` | Optional | MediaStack calls per ingest run; default `3`, clamped 0-7, `0` disables the source. Categories rotate daily. |
 | `GROQ_API_KEY` | Optional | First summary provider. |
 | `GROQ_MODEL` | Optional | Groq model; default `llama-3.1-8b-instant`. |
 | `GEMINI_API_KEY` | Optional | Second summary provider. |
@@ -105,7 +107,7 @@ Both also have `workflow_dispatch` for manual runs.
 9. **Install and notifications.** Chrome/Android: use "Install app". iOS: Share -> Add to Home Screen first (iOS 16.4+), then open from the home screen. In Settings enable notifications and press "Send test notification".
 10. **Daily push.** The "Push Dispatch" workflow runs every 15 minutes. GitHub's scheduler can delay runs, and GitHub disables scheduled workflows after 60 days of repository inactivity on public repos (re-enable them in the Actions tab).
 
-Function duration: `/api/cron/news` and `/api/cron/push` set `maxDuration = 60`; the ingest stops starting new work after about 50 s. Verified 2026-10-18 against Vercel's [duration docs](https://vercel.com/docs/functions/configuring-functions/duration): with fluid compute (default) the Hobby plan default and maximum are 300 s, so 60 s is allowed.
+Function duration: `/api/cron/news` and `/api/cron/push` set `maxDuration` of 120 s and 60 s respectively; the ingest stops starting new work after about 100 s (source fetching is capped at 35 s) and the push dispatcher after about 50 s. Verified 2026-10-18 against Vercel's [duration docs](https://vercel.com/docs/functions/configuring-functions/duration): with fluid compute (default) the Hobby plan default and maximum are 300 s, so both values are allowed.
 
 ### Troubleshooting
 
@@ -164,12 +166,12 @@ Counts below come from the code (`src/lib/categories.ts`, source adapters), for 
 | RSS feeds | 47 feed requests | n/a | none | fine |
 | Guardian API | 19 (unique sections, shared across categories), all sent in parallel (`Promise.all`) | 570 | Not verified: the access page could not be fetched on 2026-10-18. Commonly cited developer-key limits are 12 req/s and 5,000 req/day; check [the access page](https://open-platform.theguardian.com/access/) before relying on this. | Unverified. 19 simultaneous requests may exceed a per-second limit |
 | GNews | 7 (categories with a GNews topic) | 210 | Free plan: 100 requests/day, 10 articles/request, 12 h delay (checked 2026-10-18 on [gnews.io](https://gnews.io/#pricing)) | within budget |
-| MediaStack | 7 (distinct MediaStack categories) | 210 | Free plan: 100 calls/month (checked 2026-10-18 on [mediastack.com/product](https://mediastack.com/product)) | OVER budget |
+| MediaStack | 3 by default (`MEDIASTACK_MAX_CALLS_PER_RUN`, rotating over the 7 distinct MediaStack categories) | ~90 | Free plan: 100 calls/month (checked 2026-10-18 on [mediastack.com/product](https://mediastack.com/product)) | within budget |
 | `og:image` page fetches | at most 60 | n/a | none (hotlink to publishers) | fine |
 | Groq / Gemini | at most ceil(articles needing a summary / 8) per provider | n/a | provider-defined, may change: see [Groq limits](https://console.groq.com/docs/rate-limits) and [Gemini limits](https://ai.google.dev/gemini-api/docs/rate-limits) | see below |
 | Push tick (every 15 min) | 0 external API calls unless subscriptions are due; then one push-service request per due subscription | n/a | n/a | fine |
 
-WARNING: MediaStack's free plan allows only 100 calls per month (verified 2026-10-18). One ingest per day makes 7 calls, i.e. 210 per month, so the quota is exhausted after about 14 days and later runs get HTTP 429 (harmless to the rest of the ingest, but MediaStack contributes nothing for the rest of the month). Budget = runs per day x calls x 30 and must be <= 100. Mitigations: leave `MEDIASTACK_API_KEY` unset (the source is skipped), or remove `mediastackCategory` from most categories in `src/lib/categories.ts` so that 3 or fewer remain (3 x 30 = 90). GNews allows 100/day: 7 calls per run leaves room for about 14 runs per day.
+MediaStack's free plan allows only 100 calls per month (verified 2026-10-18). Querying all 7 categories daily would need 210, so each run is capped at `MEDIASTACK_MAX_CALLS_PER_RUN` calls (default 3, about 90 per month at one run per day, within the 100 limit). Categories are picked by a deterministic daily rotation (sorted distinct categories, start index = day-of-year (UTC) x cap mod 7, then `cap` consecutive, wrapping), so every category is covered every few days. Budget = runs per day x cap x 30 and must be <= 100: if you trigger extra manual runs, lower the cap or set it to `0`. Security note: the free plan serves only plain `http`, so the `access_key` travels in plaintext on every MediaStack request; use a key you can rotate and prefer disabling the source (`0` or unset key) if that is unacceptable. GNews allows 100/day: 7 calls per run leaves room for about 14 runs per day.
 
 Example real run (scratch database, not the production database, RSS + Guardian + GNews + MediaStack keys set, no LLM keys):
 
@@ -183,6 +185,7 @@ fetched 1608, kept 244, created 244, updated 0, summarized 244, llmSummarized 0,
 
 - Deduplication is token-based. It will not merge aliases such as "Fed" and "Federal Reserve", and occasionally merges two distinct events with near-identical headlines into one card (both outlets' links stay available).
 - Push delivery depends on the GitHub Actions scheduler, which can run late. A push is skipped for the day if the scheduler is down more than 3 hours after the chosen time. The window does not wrap past local midnight.
+- The articles list is served network-first by the service worker (3 s timeout, then a cached copy younger than 6 h, else a 503 `offline` JSON), so a notification tap shows fresh stories whenever the network is up.
 - Push sending claims the subscription before sending, so delivery is at-most-once: a crash or push-service error after the claim means no retry that day.
 - Images are hotlinked from publishers. Some may block or break; the card falls back gracefully.
 - The `og:image` fallback fetches publisher pages from the server IP, which some sites may block.

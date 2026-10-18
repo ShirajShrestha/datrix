@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/db';
-import { PushSub } from '@/lib/models/PushSub';
+import { PushSub, UNCONFIRMED_SUB_TTL_MS } from '@/lib/models/PushSub';
 import { localParts, validateSubscribeBody } from '@/lib/services/push';
 import { readJsonBody, jsonError } from '@/lib/pushRequest';
 
@@ -22,6 +22,9 @@ export async function POST(request: NextRequest) {
   const local = localParts(new Date(), timeZone);
   const [h, m] = time.split(':').map(Number);
   if (local && local.minutes >= h * 60 + m) setOnInsert.lastSentDate = local.date;
+
+  // Unconfirmed rows expire after 14 days; updates of existing rows never touch expireAt.
+  setOnInsert.expireAt = new Date(Date.now() + UNCONFIRMED_SUB_TTL_MS);
 
   try {
     await connectToDatabase();

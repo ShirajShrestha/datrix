@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { runIngest } from '@/lib/services/ingest';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 export async function GET(request: NextRequest) {
   const secret = process.env.CRON_SECRET;

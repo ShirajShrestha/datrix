@@ -3,15 +3,16 @@
  */
 
 // ---- 1. Config -------------------------------------------------------------
-const VERSION = 'v2';
+const VERSION = 'v3';
 const STATIC_CACHE = `datrix-static-${VERSION}`;
 const SHELL_CACHE = `datrix-shell-${VERSION}`;
 const IMAGE_CACHE = `datrix-images-${VERSION}`;
-const ARTICLES_CACHE = 'datrix-articles'; // fixed name; content is expired by age/size
+const ARTICLES_CACHE = `datrix-articles-${VERSION}`; // versioned so a bump purges old entries
 const ALL_CACHES = [STATIC_CACHE, SHELL_CACHE, IMAGE_CACHE, ARTICLES_CACHE];
 
 const ARTICLES_MAX_ENTRIES = 24;
-const ARTICLES_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const ARTICLES_MAX_AGE_MS = 6 * 60 * 60 * 1000; // cached list is only a offline/slow-network fallback
+const ARTICLES_NETWORK_TIMEOUT_MS = 3000;
 const IMAGES_MAX_ENTRIES = 60;
 const STATIC_MAX_ENTRIES = 120;
 const DATE_HEADER = 'x-sw-cached-at';
@@ -92,31 +93,49 @@ async function cacheFirst(event, cacheName, maxEntries) {
   return res;
 }
 
-async function staleWhileRevalidateArticles(event) {
+const offlineJson = () =>
+  new Response(JSON.stringify({ success: false, error: 'offline' }), { status: 503, headers: { 'Content-Type': 'application/json' } });
+
+// Network-first with a 3 s timeout. The cache is only a fallback (network error, 5xx or timeout) and
+// only if the entry is younger than ARTICLES_MAX_AGE_MS. A successful 200 refreshes the cache.
+// If the network is merely slow and nothing usable is cached, we keep waiting for it (a 503 would be worse).
+async function networkFirstArticles(event) {
   const request = event.request;
   const cache = await caches.open(ARTICLES_CACHE);
-  const cached = await cache.match(request);
-  const usable = cached && isFresh(cached, ARTICLES_MAX_AGE_MS) ? cached : null;
-  if (cached && !usable) {
-    try { await cache.delete(request); } catch {}
-  }
-
-  const network = fetch(request)
-    .then(async (res) => {
+  const network = fetch(request).then(
+    (res) => {
       if (isCacheable(res)) {
-        await safePut(cache, request, res.clone(), true);
-        await trim(ARTICLES_CACHE, ARTICLES_MAX_ENTRIES);
+        const copy = res.clone();
+        event.waitUntil(safePut(cache, request, copy, true).then(() => trim(ARTICLES_CACHE, ARTICLES_MAX_ENTRIES)));
       }
       return res;
-    })
-    .catch(() => null);
+    },
+    () => null
+  );
+  const TIMED_OUT = Symbol('timeout');
+  let timer;
+  const timeout = new Promise((resolve) => { timer = setTimeout(() => resolve(TIMED_OUT), ARTICLES_NETWORK_TIMEOUT_MS); });
+  const first = await Promise.race([network, timeout]);
+  clearTimeout(timer);
+  if (first !== TIMED_OUT && first && first.status < 500) return first;
 
+  let usable = null;
+  try {
+    const cached = await cache.match(request);
+    if (cached && isFresh(cached, ARTICLES_MAX_AGE_MS)) usable = cached;
+    else if (cached) await cache.delete(request);
+  } catch {}
   if (usable) {
-    event.waitUntil(network);
+    if (first === TIMED_OUT) event.waitUntil(network); // let the slow request still refresh the cache
     return usable;
   }
-  const res = await network;
-  return res || new Response(JSON.stringify({ error: 'offline' }), { status: 503, headers: { 'Content-Type': 'application/json' } });
+  if (first === TIMED_OUT) {
+    const late = await network;
+    if (late) return late;
+  } else if (first) {
+    return first; // 5xx and nothing to fall back to
+  }
+  return offlineJson();
 }
 
 // Network-first. Offline: exact cached hit -> cached '/' only for '/' itself -> /offline.html.
@@ -178,14 +197,14 @@ self.addEventListener('activate', (event) => {
 // ---- 5. Fetch routing ------------------------------------------------------
 self.addEventListener('fetch', (event) => {
   const route = routeFor(event.request, self.location.origin);
-  if (route === 'articles') event.respondWith(staleWhileRevalidateArticles(event));
+  if (route === 'articles') event.respondWith(networkFirstArticles(event));
   else if (route === 'static') event.respondWith(cacheFirst(event, STATIC_CACHE, STATIC_MAX_ENTRIES));
   else if (route === 'image') event.respondWith(cacheFirst(event, IMAGE_CACHE, IMAGES_MAX_ENTRIES));
   else if (route === 'navigate') event.respondWith(navigationHandler(event));
 });
 
 // Test-only hook (harmless in production): exposes internals to src/lib/__tests__/sw.test.ts.
-self.__datrixSw = { parsePushData, safeNotificationUrl, handleNotificationClick, routeFor, isCacheable, isLegacyCacheName, navigationHandler, staleWhileRevalidateArticles, cacheFirst, safePut, SHELL_CACHE, ARTICLES_CACHE };
+self.__datrixSw = { parsePushData, safeNotificationUrl, handleNotificationClick, routeFor, isCacheable, isLegacyCacheName, navigationHandler, networkFirstArticles, cacheFirst, safePut, SHELL_CACHE, ARTICLES_CACHE, ARTICLES_MAX_AGE_MS, ARTICLES_NETWORK_TIMEOUT_MS };
 
 
 // ---- 6. Push ---------------------------------------------------------------

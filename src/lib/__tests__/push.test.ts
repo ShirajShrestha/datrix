@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { localParts, isDue, buildPayload, sendToSub, sendToSubDetailed, isAllowedPushEndpoint, validateSubscribeBody, _resetVapidForTests, PUSH_WINDOW_MINUTES } from '@/lib/services/push';
-import { PushSub } from '@/lib/models/PushSub';
+import { PushSub, UNCONFIRMED_SUB_TTL_MS, CONFIRMED_SUB_TTL_MS } from '@/lib/models/PushSub';
 
 const NPT = { time: '08:00', timeZone: 'Asia/Kathmandu' };
 const at = (s: string) => new Date(s);
@@ -160,6 +160,15 @@ describe('PushSub schema', () => {
   it('declares unique endpoint index', () => {
     const idx = PushSub.schema.indexes() as [Record<string, number>, Record<string, unknown>][];
     expect(idx.some(([f, o]) => f.endpoint === 1 && o.unique === true)).toBe(true);
+  });
+  it('declares a TTL index on expireAt with expireAfterSeconds 0', () => {
+    const idx = PushSub.schema.indexes() as [Record<string, number>, Record<string, unknown>][];
+    expect(idx).toContainEqual([{ expireAt: 1 }, expect.objectContaining({ expireAfterSeconds: 0 })]);
+  });
+  it('expiry windows: 14 days unconfirmed, 90 days confirmed; expireAt optional', () => {
+    expect(UNCONFIRMED_SUB_TTL_MS).toBe(14 * 86400_000);
+    expect(CONFIRMED_SUB_TTL_MS).toBe(90 * 86400_000);
+    expect(new PushSub({ ...valid(), expireAt: new Date() }).validateSync()).toBeUndefined();
   });
   it('rejects non-padded lastSentDate', () => {
     expect(new PushSub({ ...valid(), lastSentDate: '2026-1-1' }).validateSync()?.errors.lastSentDate).toBeDefined();

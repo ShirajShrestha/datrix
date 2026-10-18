@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/db';
-import { PushSub } from '@/lib/models/PushSub';
+import { PushSub, CONFIRMED_SUB_TTL_MS } from '@/lib/models/PushSub';
 import { sendToSub } from '@/lib/services/push';
 import { readJsonBody, endpointFromBody, jsonError } from '@/lib/pushRequest';
 
@@ -40,6 +40,8 @@ export async function POST(request: NextRequest) {
       return jsonError('Subscription expired', 410);
     }
     if (result === 'error') return jsonError('Send failed', 502);
+    // Delivered: this is a real subscriber, extend the expiry.
+    await PushSub.updateOne({ _id: sub._id }, { $set: { expireAt: new Date(Date.now() + CONFIRMED_SUB_TTL_MS) } }).catch(() => {});
     return NextResponse.json({ success: true });
   } catch (e) {
     console.error('Test push failed:', e instanceof Error ? e.name : 'unknown');

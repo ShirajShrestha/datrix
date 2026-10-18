@@ -70,7 +70,7 @@ describe('computeExpireAt', () => {
   });
 });
 
-import { planImageBudget, mergeByUrl, buildOps, selectNeedSummary } from '../services/ingest';
+import { planImageBudget, mergeByUrl, buildOps, selectNeedSummary, sanitizeArticleUrls, planFetchDeadline, INGEST_BUDGET_MS } from '../services/ingest';
 import { Article } from '../models/Article';
 
 describe('planImageBudget', () => {
@@ -86,6 +86,37 @@ describe('planImageBudget', () => {
   });
   it('<12s remaining -> run false', () => {
     expect(planImageBudget(39000, 50000).run).toBe(false);
+  });
+});
+
+describe('budget constants and fetch deadline', () => {
+  it('budget is 100 s; default image plan at start keeps max 60 and 12 s / 8 s rules', () => {
+    expect(INGEST_BUDGET_MS).toBe(100_000);
+    expect(planImageBudget(40_000)).toEqual({ run: true, max: 60, raceMs: 52_000 });
+    expect(planImageBudget(88_001).run).toBe(false);
+    expect(planImageBudget(88_000).run).toBe(true);
+  });
+  it('planFetchDeadline = min(35 s, remaining - 20 s), floored at 0', () => {
+    expect(planFetchDeadline(0)).toBe(35_000);
+    expect(planFetchDeadline(0, 40_000)).toBe(20_000);
+    expect(planFetchDeadline(50_000, 60_000)).toBe(0);
+  });
+});
+
+describe('sanitizeArticleUrls', () => {
+  const base = { title: 't', source: 'BBC' };
+  it('drops articles with non-http(s) or invalid urls', () => {
+    for (const url of ['javascript:alert(1)', 'data:text/html,x', 'ftp://x.com/a', 'not a url', '']) {
+      expect(sanitizeArticleUrls({ ...base, url, sources: [{ name: 'BBC', url: 'https://x.com' }] })).toBeNull();
+    }
+  });
+  it('filters bad sources entries and keeps good ones', () => {
+    const out = sanitizeArticleUrls({ ...base, url: 'https://x.com/a', sources: [{ name: 'A', url: 'javascript:1' }, { name: 'B', url: 'http://b.com/x' }] });
+    expect(out?.sources).toEqual([{ name: 'B', url: 'http://b.com/x' }]);
+  });
+  it('falls back to own url when no source is valid', () => {
+    const out = sanitizeArticleUrls({ ...base, url: 'https://x.com/a', sources: [{ name: 'A', url: 'data:x' }] });
+    expect(out?.sources).toEqual([{ name: 'BBC', url: 'https://x.com/a' }]);
   });
 });
 
@@ -119,6 +150,7 @@ describe('buildOps', () => {
     expect(setKeys.filter((k) => insKeys.includes(k))).toEqual([]);
     expect(u.update.$set.expireAt).toEqual(computeExpireAt(a.publishedAt, now));
     expect(u.update.$set.summary).toEqual(sum);
+    expect(u.update.$set.updatedAt).toEqual(now);
     expect('imageUrl' in u.update.$set).toBe(false);
   });
   it('no summary when none new or already stored; imageUrl only when present', () => {

@@ -31,12 +31,13 @@ export async function summarizeBatch(
   items: SummaryInput[],
   providers: SummaryProvider[] = [groqProvider, geminiProvider],
   opts: SummarizeOpts = {},
-): Promise<{ summaries: Map<string, ArticleSummary>; llmCalls: number }> {
+): Promise<{ summaries: Map<string, ArticleSummary>; llmCalls: number; failures: string[] }> {
   const now = opts.now ?? Date.now;
   const concurrency = Math.max(1, Math.floor(opts.concurrency ?? 3));
   const out = new Map<string, ArticleSummary>();
   const dead = new Set<number>();
   let llmCalls = 0;
+  const failures = new Set<string>(); // coarse `summarizer:<provider>:<token>` only; never messages/URLs/keys
 
   const groups: SummaryInput[][] = [];
   for (let i = 0; i < items.length; i += GROUP_SIZE) groups.push(items.slice(i, i + GROUP_SIZE));
@@ -57,15 +58,21 @@ export async function summarizeBatch(
         llmCalls++;
         const res = await providers[pi](missing, { timeoutMs });
         const wanted = new Set(missing.map((m) => m.url));
+        let usable = 0;
         for (const [url, s] of res) {
-          if (wanted.has(url) && s && typeof s.tldr === 'string' && s.tldr) got.set(url, { ...s, provider: label });
+          if (wanted.has(url) && s && typeof s.tldr === 'string' && s.tldr) { got.set(url, { ...s, provider: label }); usable++; }
         }
+        if (usable === 0) failures.add(`summarizer:${label}:parse`);
       } catch (e) {
         if (e instanceof MissingKeyError) {
           llmCalls--;
           dead.add(pi);
-        } else if (e instanceof ProviderHttpError && e.status === 429) {
-          dead.add(pi);
+        } else if (e instanceof ProviderHttpError) {
+          failures.add(`summarizer:${label}:${Number.isInteger(e.status) ? e.status : 'error'}`);
+          if (e.status === 429) dead.add(pi);
+        } else {
+          const name = (e as { name?: unknown } | null)?.name;
+          failures.add(`summarizer:${label}:${name === 'TimeoutError' || name === 'AbortError' ? 'timeout' : 'error'}`);
         }
       }
     }
@@ -85,5 +92,5 @@ export async function summarizeBatch(
       out.set(b.url, results[gi].get(b.url) ?? extractiveSummary(b));
     }
   }
-  return { summaries: out, llmCalls };
+  return { summaries: out, llmCalls, failures: [...failures] };
 }

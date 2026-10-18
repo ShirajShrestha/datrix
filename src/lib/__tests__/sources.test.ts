@@ -19,12 +19,12 @@ vi.mock('../sources/mediastack', async (orig) => ({
 
 import { mapGuardianResult, fetchGuardian } from '../sources/guardian';
 import { mapGNewsArticle, fetchGNews } from '../sources/gnews';
-import { mapMediaStackArticle, isLowQualityTitle, fetchMediaStack } from '../sources/mediastack';
+import { mapMediaStackArticle, isLowQualityTitle, fetchMediaStack, pickMediastackCategories, mediastackCap } from '../sources/mediastack';
 import { fetchRss } from '../sources/rss';
 import { fetchAllSources } from '../sources';
 import { SourceError } from '../sources/types';
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe('sources', () => {
   it('mapGuardianResult maps thumbnail and trailText', () => {
@@ -186,5 +186,107 @@ describe('fetchRss failure signalling', () => {
       n++ === 0 ? new Response('x', { status: 503 }) : new Response(rssXml, { status: 200 })));
     const r = await real.fetchRss();
     expect(r.length).toBeGreaterThan(0);
+  });
+});
+
+describe('fetchAllSources deadline', () => {
+  const art = (u: string) => ({ title: 't', url: `https://x.com/${u}`, source: 's', category: 'world' as const, publishedAt: new Date() });
+  const never = () => new Promise<never>(() => {});
+
+  it('slow adapter times out; others keep their articles', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const p = fetchAllSources({
+      deadlineMs: 1000,
+      adapters: [['fast', async () => [art('a')]], ['slow', never], ['fast2', async () => [art('b')]]],
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    const r = await p;
+    expect(r.articles).toHaveLength(2);
+    expect(r.failures).toEqual(['timeout:slow']);
+  });
+
+  it('all fast: unchanged and does not wait for the deadline', async () => {
+    const r = await fetchAllSources({ deadlineMs: 60_000, adapters: [['a', async () => [art('a')]], ['b', async () => []]] });
+    expect(r.articles).toHaveLength(1);
+    expect(r.failures).toEqual([]);
+  });
+
+  it('rejecting adapter still reports its bare name', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const r = await fetchAllSources({
+      deadlineMs: 60_000,
+      adapters: [['bad', async () => { throw new Error('x'); }], ['sync', () => { throw new Error('y'); }], ['ok', async () => [art('a')]]],
+    });
+    expect(r.failures).toEqual(['bad', 'sync']);
+    expect(r.articles).toHaveLength(1);
+  });
+
+  it('late rejection after the deadline causes no unhandled rejection', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    const p = fetchAllSources({
+      deadlineMs: 100,
+      adapters: [['late', () => new Promise<never>((_, rej) => setTimeout(() => rej(new Error('late')), 500))]],
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    expect((await p).failures).toEqual(['timeout:late']);
+    await vi.advanceTimersByTimeAsync(1000);
+    vi.useRealTimers();
+    await new Promise((r) => setImmediate(r));
+    process.off('unhandledRejection', unhandled);
+    expect(unhandled).not.toHaveBeenCalled();
+  });
+});
+
+describe('mediastack rotation and cap', () => {
+  const cats = ['general', 'technology', 'business', 'science', 'health', 'sports', 'entertainment'];
+  const day = (n: number) => new Date(Date.UTC(2026, 0, n)); // Jan n => dayOfYear n
+
+  it('returns cap consecutive sorted categories, wrapping', () => {
+    const sorted = [...cats].sort();
+    const out = pickMediastackCategories(cats, 3, day(1)); // start = 3
+    expect(out).toEqual([sorted[3], sorted[4], sorted[5]]);
+    const wrap = pickMediastackCategories(cats, 3, day(2)); // start = 6
+    expect(wrap).toEqual([sorted[6], sorted[0], sorted[1]]);
+  });
+  it('covers every category over successive days', () => {
+    const seen = new Set<string>();
+    for (let d = 1; d <= 7; d++) pickMediastackCategories(cats, 3, day(d)).forEach((c) => seen.add(c));
+    expect(seen.size).toBe(cats.length);
+  });
+  it('deterministic and order-independent; dedupes', () => {
+    expect(pickMediastackCategories([...cats].reverse().concat(cats), 3, day(5))).toEqual(pickMediastackCategories(cats, 3, day(5)));
+  });
+  it('empty list, cap 0, cap above n', () => {
+    expect(pickMediastackCategories([], 3, day(1))).toEqual([]);
+    expect(pickMediastackCategories(cats, 0, day(1))).toEqual([]);
+    expect(pickMediastackCategories(['a', 'b'], 5, day(1))).toHaveLength(2);
+  });
+  it('mediastackCap clamps 0-7, defaults to 3', () => {
+    expect(mediastackCap(undefined)).toBe(3);
+    expect(mediastackCap('')).toBe(3);
+    expect(mediastackCap('abc')).toBe(3);
+    expect(mediastackCap('0')).toBe(0);
+    expect(mediastackCap('-4')).toBe(0);
+    expect(mediastackCap('5')).toBe(5);
+    expect(mediastackCap('99')).toBe(7);
+  });
+  it('real fetchMediaStack makes at most cap calls, none when cap is 0', async () => {
+    const real = await vi.importActual<typeof import('../sources/mediastack')>('../sources/mediastack');
+    vi.stubEnv('MEDIASTACK_API_KEY', 'K');
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const f = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ data: [] }), { status: 200 }));
+    vi.stubGlobal('fetch', f);
+    vi.stubEnv('MEDIASTACK_MAX_CALLS_PER_RUN', '2');
+    await real.fetchMediaStack();
+    expect(f).toHaveBeenCalledTimes(2);
+    f.mockClear();
+    vi.stubEnv('MEDIASTACK_MAX_CALLS_PER_RUN', '0');
+    expect(await real.fetchMediaStack()).toEqual([]);
+    expect(f).not.toHaveBeenCalled();
+    vi.unstubAllEnvs(); vi.unstubAllGlobals();
   });
 });

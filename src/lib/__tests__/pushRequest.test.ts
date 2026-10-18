@@ -8,7 +8,9 @@ const req = (headers: Record<string, string>, body = '{}') =>
 describe('sameOrigin', () => {
   it('matches host', () => expect(sameOrigin(req({ origin: 'https://app.test', host: 'app.test' }))).toBe(true));
   it('mismatch', () => expect(sameOrigin(req({ origin: 'https://evil.test', host: 'app.test' }))).toBe(false));
-  it('no Origin allowed', () => expect(sameOrigin(req({ host: 'app.test' }))).toBe(true));
+  it('no Origin allowed by default', () => expect(sameOrigin(req({ host: 'app.test' }))).toBe(true));
+  it('no Origin rejected when required', () => expect(sameOrigin(req({ host: 'app.test' }), { requireOrigin: true })).toBe(false));
+  it('matching Origin ok when required', () => expect(sameOrigin(req({ origin: 'https://app.test', host: 'app.test' }), { requireOrigin: true })).toBe(true));
   it('Origin: null rejected', () => expect(sameOrigin(req({ origin: 'null', host: 'app.test' }))).toBe(false));
   it('x-forwarded-host takes precedence', () => {
     expect(sameOrigin(req({ origin: 'https://public.test', host: 'internal', 'x-forwarded-host': 'public.test' }))).toBe(true);
@@ -18,15 +20,23 @@ describe('sameOrigin', () => {
 
 describe('readJsonBody', () => {
   it('valid', async () => {
-    const r = await readJsonBody(req({}, '{"a":1}'));
+    const r = await readJsonBody(req({ origin: 'https://app.test', host: 'app.test' }, '{"a":1}'));
     expect(r.ok && r.body).toEqual({ a: 1 });
   });
+  it('missing Origin -> 403 by default', async () => {
+    const r = await readJsonBody(req({ host: 'app.test' }, '{"a":1}'));
+    expect(!r.ok && r.response.status).toBe(403);
+  });
+  it('missing Origin allowed with requireOrigin:false', async () => {
+    const r = await readJsonBody(req({ host: 'app.test' }, '{"a":1}'), { requireOrigin: false });
+    expect(r.ok).toBe(true);
+  });
   it('bad JSON -> 400', async () => {
-    const r = await readJsonBody(req({}, '{nope'));
+    const r = await readJsonBody(req({ origin: 'https://app.test', host: 'app.test' }, '{nope'));
     expect(!r.ok && r.response.status).toBe(400);
   });
   it('oversize -> 413', async () => {
-    const r = await readJsonBody(req({}, 'x'.repeat(MAX_BODY_BYTES + 1)));
+    const r = await readJsonBody(req({ origin: 'https://app.test', host: 'app.test' }, 'x'.repeat(MAX_BODY_BYTES + 1)));
     expect(!r.ok && r.response.status).toBe(413);
   });
   it('cross-origin -> 403', async () => {

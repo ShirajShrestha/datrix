@@ -2,6 +2,15 @@ import mongoose, { Schema, Document } from 'mongoose';
 import { CATEGORIES, type CategorySlug } from '@/lib/categories';
 import { localParts } from '@/lib/services/push';
 
+/**
+ * Subscription expiry (TTL on expireAt), an anti-abuse measure: anyone can POST /api/push/subscribe
+ * with a syntactically valid endpoint, so a new row lives only 14 days unless a push is actually
+ * delivered (cron/push or a test send), which moves expireAt to 90 days. Re-subscribing an
+ * existing endpoint never changes expireAt. Real users get their first push within a day.
+ */
+export const UNCONFIRMED_SUB_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+export const CONFIRMED_SUB_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+
 const SLUGS = new Set<string>(CATEGORIES.map((c) => c.slug));
 
 export interface IPushSub extends Document {
@@ -14,6 +23,7 @@ export interface IPushSub extends Document {
   lastTestAt?: Date;
   failCount?: number;
   lastFailDate?: string;
+  expireAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -51,8 +61,12 @@ const PushSubSchema = new Schema<IPushSub>(
     lastTestAt: { type: Date },
     failCount: { type: Number, default: 0 },
     lastFailDate: { type: String },
+    expireAt: { type: Date },
   },
   { timestamps: true },
 );
+
+// Rows created before this field existed have no expireAt and are never expired by the TTL.
+PushSubSchema.index({ expireAt: 1 }, { expireAfterSeconds: 0 });
 
 export const PushSub = mongoose.models.PushSub || mongoose.model<IPushSub>('PushSub', PushSubSchema);
