@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, Suspense } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import NewsCard, { NewsArticle } from '@/components/NewsCard';
 import { NewsGridSkeleton } from '@/components/Skeletons';
@@ -19,34 +19,33 @@ function SearchContent() {
   const [prefs] = usePrefs();
   const chosenKey = effectiveCategories(prefs).join(',');
 
-  const fetchNews = useCallback(async (q: string) => {
-    if (!hydrated) return;
-    if (!q.trim()) {
-      setArticles([]);
-      return;
-    }
-    
-    setLoading(true);
-    try {
-      const response = await fetch(`/api/articles?q=${encodeURIComponent(q)}&categories=${encodeURIComponent(chosenKey)}`);
-      const data = await response.json();
-      
-      if (data.success) {
-        setArticles(data.articles);
-      }
-    } catch (error) {
-      console.error('Error searching news:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [hydrated, chosenKey]);
+  const hasQuery = searchQuery.trim().length > 0;
 
   useEffect(() => {
-    const debounce = setTimeout(() => {
-      fetchNews(searchQuery);
+    if (!hydrated) return;
+    if (!hasQuery) return;
+    const controller = new AbortController();
+    const debounce = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const response = await fetch(
+          `/api/articles?q=${encodeURIComponent(searchQuery)}&categories=${encodeURIComponent(chosenKey)}`,
+          { signal: controller.signal }
+        );
+        const data = await response.json();
+        if (controller.signal.aborted) return;
+        if (data.success) setArticles(data.articles);
+      } catch (error) {
+        if (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) return;
+        console.error('Error searching news:', error);
+      }
+      if (!controller.signal.aborted) setLoading(false);
     }, 300);
-    return () => clearTimeout(debounce);
-  }, [searchQuery, fetchNews]);
+    return () => {
+      clearTimeout(debounce);
+      controller.abort();
+    };
+  }, [hydrated, chosenKey, searchQuery, hasQuery]);
 
   return (
     <div className="min-h-screen">
@@ -62,9 +61,9 @@ function SearchContent() {
           />
         </div>
 
-        {loading ? (
+        {hasQuery && loading ? (
           <NewsGridSkeleton count={6} />
-        ) : searchQuery && articles.length > 0 ? (
+        ) : hasQuery && articles.length > 0 ? (
           <div>
             <p className="text-sm text-zinc-500 mb-4">
               Found {articles.length} results for &quot;{searchQuery}&quot;
@@ -75,7 +74,7 @@ function SearchContent() {
               ))}
             </div>
           </div>
-        ) : searchQuery ? (
+        ) : hasQuery ? (
           <div className="text-center py-12">
             <p className="text-zinc-500">No results found for &quot;{searchQuery}&quot;</p>
             <p className="text-sm text-zinc-600 mt-2">Try different keywords</p>

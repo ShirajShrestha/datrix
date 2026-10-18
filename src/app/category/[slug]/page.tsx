@@ -5,12 +5,13 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import NewsCard, { NewsArticle } from '@/components/NewsCard';
 import { NewsGridSkeleton } from '@/components/Skeletons';
+import { safeDecode } from '@/lib/safeDecode';
 import { getCategory, normalizeSlug } from '@/lib/categories';
 
 export default function CategoryPage() {
   const params = useParams();
   const rawSlug = Array.isArray(params.slug) ? params.slug[0] : (params.slug as string);
-  const slug = normalizeSlug(decodeURIComponent(rawSlug ?? ''));
+  const slug = normalizeSlug(safeDecode(rawSlug ?? ''));
   const def = slug ? getCategory(slug) : undefined;
 
   const [articles, setArticles] = useState<NewsArticle[]>([]);

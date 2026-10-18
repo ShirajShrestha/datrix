@@ -41,33 +41,40 @@ export default function Home() {
 
   const savedArticles = useLocalStorageStore<NewsArticle[]>(SAVED_ARTICLES_KEY, []);
 
-  const fetchNews = useCallback(async () => {
-    if (!hydrated) return;
-    setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (searchQuery) params.set('q', searchQuery);
-      params.set('categories', selectedCategory === 'all' ? chosenKey : selectedCategory);
-      if (selectedImportance !== 'all') params.set('importance', selectedImportance);
-
-      const response = await fetch(`/api/articles?${params.toString()}`);
-      const data = await response.json();
-      
-      if (data.success) {
-        setArticles(data.articles);
-        setFilteredArticles(data.articles);
-        setCurrentPage(1);
-      }
-    } catch (error) {
-      console.error('Error fetching news:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [hydrated, chosenKey, searchQuery, selectedCategory, selectedImportance]);
+  // Reset a stale chip (e.g. category deselected in another tab) to 'all'.
+  const effectiveSelected: Category =
+    selectedCategory === 'all' || effectiveCategories(prefs).includes(selectedCategory)
+      ? selectedCategory
+      : 'all';
 
   useEffect(() => {
-    fetchNews();
-  }, [fetchNews]);
+    if (!hydrated) return;
+    const controller = new AbortController();
+    (async () => {
+      setLoading(true);
+      try {
+        const params = new URLSearchParams();
+        if (searchQuery) params.set('q', searchQuery);
+        params.set('categories', effectiveSelected === 'all' ? chosenKey : effectiveSelected);
+        if (selectedImportance !== 'all') params.set('importance', selectedImportance);
+
+        const response = await fetch(`/api/articles?${params.toString()}`, { signal: controller.signal });
+        const data = await response.json();
+        if (controller.signal.aborted) return;
+
+        if (data.success) {
+          setArticles(data.articles);
+          setFilteredArticles(data.articles);
+          setCurrentPage(1);
+        }
+      } catch (error) {
+        if (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) return;
+        console.error('Error fetching news:', error);
+      }
+      if (!controller.signal.aborted) setLoading(false);
+    })();
+    return () => controller.abort();
+  }, [hydrated, chosenKey, searchQuery, effectiveSelected, selectedImportance]);
 
   const handleSearch = useCallback((query: string) => {
     setSearchQuery(query);
@@ -119,7 +126,7 @@ export default function Home() {
         onSearch={handleSearch}
         onCategoryChange={handleCategoryChange}
         onImportanceChange={handleImportanceChange}
-        selectedCategory={selectedCategory}
+        selectedCategory={effectiveSelected}
         selectedImportance={selectedImportance}
       />
 
@@ -147,7 +154,7 @@ export default function Home() {
                     color: 'var(--text-primary)',
                   }}
                 >
-                  {selectedCategory === 'all' ? 'Top Stories' : getCategory(selectedCategory)?.label ?? selectedCategory}
+                  {effectiveSelected === 'all' ? 'Top Stories' : getCategory(effectiveSelected)?.label ?? effectiveSelected}
                 </h1>
                 <div className="flex items-center gap-3">
                   <span 

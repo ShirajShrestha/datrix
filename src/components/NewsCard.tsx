@@ -33,18 +33,10 @@ interface NewsCardProps {
   onSave?: (article: NewsArticle) => void;
 }
 
-const categoryColors: Record<string, { border: string; text: string; bg: string; dot: string; tint: string }> = {
-  ai: { border: 'var(--accent-ai)', text: 'var(--accent-ai)', bg: 'rgba(147, 51, 234, 0.08)', dot: 'var(--accent-ai)', tint: 'rgba(147, 51, 234, 0.05)' },
-  tech: { border: 'var(--accent-tech)', text: 'var(--accent-tech)', bg: 'rgba(8, 145, 178, 0.08)', dot: 'var(--accent-tech)', tint: 'rgba(8, 145, 178, 0.05)' },
-  economy: { border: 'var(--accent-economy)', text: 'var(--accent-economy)', bg: 'rgba(5, 150, 105, 0.08)', dot: 'var(--accent-economy)', tint: 'rgba(5, 150, 105, 0.08)' },
-  world: { border: 'var(--accent-world)', text: 'var(--accent-world)', bg: 'rgba(37, 99, 235, 0.08)', dot: 'var(--accent-world)', tint: 'rgba(37, 99, 235, 0.08)' },
-};
+type CatStyle = { border: string; text: string; bg: string; dot: string; tint: string };
 
-categoryColors.technology = categoryColors.tech;
-categoryColors.business = categoryColors.economy;
-
+const categoryColors: Record<string, CatStyle> = {};
 for (const c of CATEGORIES) {
-  if (categoryColors[c.slug]) continue;
   categoryColors[c.slug] = {
     border: c.color,
     text: c.color,
@@ -53,6 +45,9 @@ for (const c of CATEGORIES) {
     tint: `color-mix(in srgb, ${c.color} 6%, transparent)`,
   };
 }
+// Legacy aliases for articles still carrying the old single category.
+categoryColors.tech = categoryColors.technology;
+categoryColors.economy = categoryColors.business;
 
 const defaultCategory = { border: 'var(--border-highlight)', text: 'var(--text-muted)', bg: 'transparent', dot: 'var(--text-muted)', tint: 'transparent' };
 

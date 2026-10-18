@@ -17,12 +17,16 @@ export default function DigestPage() {
 
   useEffect(() => {
     if (!hydrated) return;
-    const fetchNews = async () => {
+    const controller = new AbortController();
+    (async () => {
       setLoading(true);
       try {
-        const response = await fetch(`/api/articles?limit=50&categories=${encodeURIComponent(chosenKey)}`);
+        const response = await fetch(`/api/articles?limit=50&categories=${encodeURIComponent(chosenKey)}`, {
+          signal: controller.signal,
+        });
         const data = await response.json();
-        
+        if (controller.signal.aborted) return;
+
         if (data.success) {
           const sorted = data.articles
             .sort((a: NewsArticle, b: NewsArticle) => b.importanceScore - a.importanceScore)
@@ -30,13 +34,12 @@ export default function DigestPage() {
           setArticles(sorted);
         }
       } catch (error) {
+        if (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) return;
         console.error('Error fetching digest:', error);
-      } finally {
-        setLoading(false);
       }
-    };
-
-    fetchNews();
+      if (!controller.signal.aborted) setLoading(false);
+    })();
+    return () => controller.abort();
   }, [hydrated, chosenKey]);
 
   return (

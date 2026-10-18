@@ -37,32 +37,47 @@ function Sheet({
     };
   }, []);
 
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      skip();
-      return;
-    }
-    if (e.key !== 'Tab') return;
-    const items = Array.from(
-      dialogRef.current?.querySelectorAll<HTMLElement>('button:not([disabled])') ?? []
-    );
-    if (!items.length) return;
-    const first = items[0];
-    const last = items[items.length - 1];
-    const active = document.activeElement;
-    if (e.shiftKey && active === first) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && active === last) {
-      e.preventDefault();
-      first.focus();
-    }
-  };
+  // Document-level so Escape/Tab work even if focus has left the dialog.
+  const onKeyDownRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  useEffect(() => {
+    onKeyDownRef.current = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        skip();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const items = Array.from(
+        dialogRef.current?.querySelectorAll<HTMLElement>('button:not([disabled])') ?? []
+      );
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (!dialogRef.current?.contains(active)) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      } else if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+  });
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => onKeyDownRef.current(e);
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, []);
 
   return (
     <div
       className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) dialogRef.current?.querySelector<HTMLElement>('button')?.focus();
+      }}
       style={{ background: 'rgba(0,0,0,0.6)' }}
     >
       <div
@@ -71,7 +86,7 @@ function Sheet({
         aria-modal="true"
         aria-labelledby="onboarding-title"
         aria-describedby="onboarding-desc"
-        onKeyDown={onKeyDown}
+        tabIndex={-1}
         className="w-full sm:max-w-2xl flex flex-col rounded-t-2xl sm:rounded-2xl"
         style={{
           background: 'var(--bg-surface)',
