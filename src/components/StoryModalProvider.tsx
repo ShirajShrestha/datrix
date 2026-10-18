@@ -4,7 +4,7 @@ import { createContext, Suspense, useCallback, useContext, useEffect, useMemo, u
 import { useSearchParams } from 'next/navigation';
 import type { NewsArticle } from '@/components/NewsCard';
 import StoryModal from '@/components/StoryModal';
-import { buildStoryHref, closeAction, isObjectId } from '@/lib/storyModalState';
+import { buildStoryHref, closeAction, isObjectId, shouldPushStory } from '@/lib/storyModalState';
 import { readSaved } from '@/lib/savedArticles';
 
 export interface StoryModalApi {
@@ -48,7 +48,7 @@ export function StoryModalProvider({ children }: { children: React.ReactNode }) 
 
   const removeParam = useCallback(() => {
     window.history.replaceState(
-      window.history.state,
+      null,
       '',
       buildStoryHref(window.location.pathname, window.location.search, null),
     );
@@ -59,13 +59,15 @@ export function StoryModalProvider({ children }: { children: React.ReactNode }) 
       if (!a || typeof a._id !== 'string' || !a._id) return;
       show(a);
       pushedRef.current = true;
-      pushedIdRef.current = a._id;
       closingRef.current = false;
-      window.history.pushState(
-        null,
-        '',
-        buildStoryHref(window.location.pathname, window.location.search, a._id),
-      );
+      if (shouldPushStory(pushedIdRef.current, a._id, window.location.search)) {
+        window.history.pushState(
+          null,
+          '',
+          buildStoryHref(window.location.pathname, window.location.search, a._id),
+        );
+      }
+      pushedIdRef.current = a._id;
     },
     [show],
   );
@@ -83,6 +85,14 @@ export function StoryModalProvider({ children }: { children: React.ReactNode }) 
       removeParam();
     }
   }, [show, removeParam]);
+
+  useEffect(() => {
+    const clear = () => {
+      closingRef.current = false;
+    };
+    window.addEventListener('popstate', clear);
+    return () => window.removeEventListener('popstate', clear);
+  }, []);
 
   const onUrlChange = useCallback(
     (id: string | null) => {

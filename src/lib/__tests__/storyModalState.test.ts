@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   isObjectId, buildStoryHref, readStoryParam, initialBriefState, briefReducer,
-  interpretBriefResponse, shouldFetchBrief, closeAction,
+  interpretBriefResponse, shouldFetchBrief, closeAction, shouldPushStory,
 } from '../storyModalState';
 import { toggleSaved, readSaved, toggleSavedStored, SAVED_CHANGED_EVENT } from '../savedArticles';
 
@@ -84,5 +84,13 @@ describe('savedArticles storage', () => {
     g.localStorage = { getItem: () => null, setItem: () => { throw new Error('full'); } };
     expect(toggleSavedStored({ _id: '1' })).toBe(false);
     delete g.window; delete g.localStorage;
+  });
+});
+
+describe('shouldPushStory', () => {
+  it('skips duplicate pushes', () => {
+    expect(shouldPushStory(id, id, `?story=${id}`)).toBe(false);
+    expect(shouldPushStory(null, id, `?story=${id}`)).toBe(true);
+    expect(shouldPushStory(id, id, '')).toBe(true);
   });
 });

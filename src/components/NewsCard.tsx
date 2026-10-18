@@ -5,7 +5,7 @@ import { CATEGORIES, getCategory } from '@/lib/categories';
 import { usePreviousVisit } from '@/lib/prefs';
 import { isNewSince, safeImageUrl } from '@/lib/freshness';
 import { pickDescription, relativeTime, resolveSlugs } from '@/lib/storyView';
-import { SAVED_CHANGED_EVENT, isSavedId, notifySavedChanged } from '@/lib/savedArticles';
+import { SAVED_CHANGED_EVENT, isSavedId, notifySavedChanged, toggleSavedStored } from '@/lib/savedArticles';
 import { useStoryModal } from '@/components/StoryModalProvider';
 import { Bookmark, Share2 } from 'lucide-react';
 
@@ -91,7 +91,8 @@ export default function NewsCard({ article, onSave }: NewsCardProps) {
     setIsSaved(!isSaved);
     setBookmarkAnimating(true);
     setTimeout(() => setBookmarkAnimating(false), 300);
-    onSave?.(article);
+    if (onSave) onSave(article);
+    else toggleSavedStored(article);
     notifySavedChanged();
   };
 

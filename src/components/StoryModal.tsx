@@ -96,7 +96,10 @@ export default function StoryModal({ article, onClose }: Props) {
         e.preventDefault();
         onClose();
       }}
-      onClose={onClose}
+      onClose={() => {
+        // StrictMode re-mount: cleanup's close() fires a late 'close' after re-showModal().
+        if (!dialogRef.current?.open) onClose();
+      }}
       onClick={(e) => {
         if (e.target === dialogRef.current) onClose();
       }}

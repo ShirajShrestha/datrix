@@ -36,6 +36,11 @@ export function closeAction(
   return pushed && pushedId !== null && current === pushedId ? 'back' : 'strip';
 }
 
+/** Skip pushing a duplicate entry when we already pushed this id and the URL holds it. */
+export function shouldPushStory(pushedId: string | null, id: string, search: string): boolean {
+  return !(pushedId === id && readStoryParam(search) === id);
+}
+
 export type BriefState =
   | { status: 'loading' }
   | { status: 'ready'; brief: BriefData }
