@@ -70,7 +70,7 @@ describe('computeExpireAt', () => {
   });
 });
 
-import { planImageBudget, mergeByUrl, buildOps } from '../services/ingest';
+import { planImageBudget, mergeByUrl, buildOps, selectNeedSummary } from '../services/ingest';
 import { Article } from '../models/Article';
 
 describe('planImageBudget', () => {
@@ -127,6 +127,29 @@ describe('buildOps', () => {
     expect('summary' in o1.updateOne.update.$set).toBe(false);
     expect(o1.updateOne.update.$set.imageUrl).toBe('http://i');
     const [o2] = buildOps([a], new Map([['u1', sum]]), new Set(['u1']), now);
+    expect('summary' in o2.updateOne.update.$set).toBe(false);
+  });
+});
+
+describe('summary upgrade rules', () => {
+  const now = new Date('2026-10-18T00:00:00Z');
+  const ext = { tldr: 'e', bullets: [] as string[], provider: 'extractive' as const };
+  it('selectNeedSummary: missing, legacy and extractive need work; groq/gemini do not; sorted by importance', () => {
+    const v = [mk('lo', 0.1, ['ai']), mk('hi', 0.9, ['ai']), mk('llm', 0.5, ['ai']), mk('gem', 0.5, ['ai']), mk('ex', 0.3, ['ai']), mk('old', 0.2, ['ai'])];
+    const { needSummary, llmSummaryUrls } = selectNeedSummary(v, [
+      { url: 'llm', summary: { tldr: 'x', provider: 'groq' } },
+      { url: 'gem', summary: { tldr: 'x', provider: 'gemini' } },
+      { url: 'ex', summary: { tldr: 'x', provider: 'extractive' } },
+      { url: 'old', summary: { tldr: 'x' } },
+    ]);
+    expect(needSummary.map((a) => a.url)).toEqual(['hi', 'ex', 'old', 'lo']);
+    expect([...llmSummaryUrls].sort()).toEqual(['gem', 'llm']);
+  });
+  it('buildOps overwrites extractive but never an LLM summary', () => {
+    const a = mk('u1', 0.5, ['ai']);
+    const [o1] = buildOps([a], new Map([['u1', { ...ext, tldr: 'new', provider: 'groq' as const }]]), new Set(), now);
+    expect((o1.updateOne.update.$set.summary as { tldr: string }).tldr).toBe('new');
+    const [o2] = buildOps([a], new Map([['u1', ext]]), new Set(['u1']), now);
     expect('summary' in o2.updateOne.update.$set).toBe(false);
   });
 });

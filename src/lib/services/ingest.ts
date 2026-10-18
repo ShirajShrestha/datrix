@@ -3,6 +3,7 @@ import { fetchAllSources } from '@/lib/sources';
 import { scoreArticles, deduplicateArticles, type ScoredArticle } from '@/lib/services/scoring';
 import { resolveImages } from '@/lib/services/images';
 import { connectToDatabase } from '@/lib/db';
+import { summarizeBatch } from '@/lib/services/summarizer';
 import { Article } from '@/lib/models/Article';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -10,6 +11,7 @@ const POOL_PER_CATEGORY = 25;
 export const INGEST_BUDGET_MS = 50_000;
 const IMAGE_MIN_REMAINING_MS = 12_000;
 const WRITE_RESERVE_MS = 8_000;
+const SUMMARY_WRITE_RESERVE_MS = 6_000;
 
 export function planImageBudget(
   elapsedMs: number,
@@ -46,7 +48,7 @@ export function mergeByUrl<T extends ScoredArticle>(items: T[]): T[] {
 export function buildOps(
   valid: ScoredArticle[],
   summaries: Map<string, StoredSummary>,
-  existingSummaryUrls: Set<string>,
+  llmSummaryUrls: Set<string>,
   now: Date,
 ) {
   return valid.map((a) => {
@@ -60,8 +62,8 @@ export function buildOps(
     };
     if (a.imageUrl) $set.imageUrl = a.imageUrl;
     const summary = summaries.get(a.url);
-    // Never overwrite a stored summary.
-    if (summary && !existingSummaryUrls.has(a.url)) $set.summary = summary;
+    // Overwrite extractive/missing summaries, but never replace a stored LLM summary.
+    if (summary && !llmSummaryUrls.has(a.url)) $set.summary = summary;
     return {
       updateOne: {
         filter: { url: a.url },
@@ -79,11 +81,33 @@ export interface IngestReport {
   created: number;
   updated: number;
   summarized: number;
+  llmSummarized: number;
   failures: string[];
   llmCalls: number;
 }
 
-export interface StoredSummary { tldr: string; bullets: string[]; whyItMatters?: string }
+export interface StoredSummary {
+  tldr: string;
+  bullets: string[];
+  whyItMatters?: string;
+  provider?: 'groq' | 'gemini' | 'extractive';
+}
+
+/** Articles needing a summary: none stored, or only an extractive/legacy one (provider not groq|gemini). */
+export function selectNeedSummary(
+  valid: ScoredArticle[],
+  existing: { url: string; summary?: { tldr?: string; provider?: string } }[],
+): { needSummary: ScoredArticle[]; llmSummaryUrls: Set<string> } {
+  const llmSummaryUrls = new Set(
+    existing
+      .filter((e) => e.summary?.tldr && (e.summary.provider === 'groq' || e.summary.provider === 'gemini'))
+      .map((e) => e.url),
+  );
+  const needSummary = valid
+    .filter((a) => !llmSummaryUrls.has(a.url))
+    .sort(compareArticles);
+  return { needSummary, llmSummaryUrls };
+}
 
 /** Throws RangeError on an invalid publishedAt (callers validate documents first). */
 export function computeExpireAt(publishedAt: Date, now: Date = new Date()): Date {
@@ -122,15 +146,13 @@ export function selectPool(articles: ScoredArticle[], perCategory: number): Scor
   return out;
 }
 
-/** TEMPORARY extractive summaries; Task 10 replaces this body with summarizeBatch. */
 async function summarizeNew(
   items: ScoredArticle[],
+  deadlineAt: number,
+  now: () => number,
 ): Promise<{ summaries: Map<string, StoredSummary>; llmCalls: number }> {
-  const summaries = new Map<string, StoredSummary>();
-  for (const a of items) {
-    summaries.set(a.url, { tldr: a.description || a.title, bullets: [] as string[] });
-  }
-  return { summaries, llmCalls: 0 };
+  const inputs = items.map((a) => ({ url: a.url, title: a.title, description: a.description }));
+  return summarizeBatch(inputs, undefined, { deadlineAt, now });
 }
 
 function hostOf(url: string): string {
@@ -159,7 +181,7 @@ export async function runIngest(opts: { clock?: () => number } = {}): Promise<In
   const { articles: raw, failures: sourceFailures } = await fetchAllSources();
   const failures = [...sourceFailures];
   const report: IngestReport = {
-    fetched: raw.length, kept: 0, created: 0, updated: 0, summarized: 0, failures, llmCalls: 0,
+    fetched: raw.length, kept: 0, created: 0, updated: 0, summarized: 0, llmSummarized: 0, failures, llmCalls: 0,
   };
   if (raw.length === 0) return report;
 
@@ -211,19 +233,17 @@ export async function runIngest(opts: { clock?: () => number } = {}): Promise<In
   const valid = mergeByUrl(validated);
   if (valid.length === 0) return report;
 
-  const existing: { url: string; summary?: { tldr?: string } }[] = await Article.find(
+  const existing: { url: string; summary?: { tldr?: string; provider?: string } }[] = await Article.find(
     { url: { $in: valid.map((a) => a.url) } },
     { url: 1, summary: 1 },
   ).lean();
-  const hasSummary = new Set(existing.filter((e) => e.summary?.tldr).map((e) => e.url));
-
-  const needSummary = valid.filter((a) => !hasSummary.has(a.url));
-  const { summaries, llmCalls } = await summarizeNew(needSummary);
+  const { needSummary, llmSummaryUrls } = selectNeedSummary(valid, existing);
+  const { summaries, llmCalls } = await summarizeNew(needSummary, startedAt + INGEST_BUDGET_MS - SUMMARY_WRITE_RESERVE_MS, clock);
   report.llmCalls = llmCalls;
-  // summarized = newly summarized docs this run (includes the extractive placeholder until Task 10).
   report.summarized = summaries.size;
+  report.llmSummarized = [...summaries.values()].filter((x) => x.provider === 'groq' || x.provider === 'gemini').length;
 
-  const ops = buildOps(valid, summaries, hasSummary, now);
+  const ops = buildOps(valid, summaries, llmSummaryUrls, now);
   try {
     const r = await Article.bulkWrite(ops, { ordered: false, throwOnValidationError: true });
     report.created = r.upsertedCount ?? 0;

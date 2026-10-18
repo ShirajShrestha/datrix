@@ -19,6 +19,7 @@ export interface IArticle extends Document {
     tldr: string;
     bullets: string[];
     whyItMatters?: string;
+    provider?: 'groq' | 'gemini' | 'extractive';
   };
   createdAt: Date;
   updatedAt: Date;
@@ -57,6 +58,7 @@ const ArticleSchema = new Schema<IArticle>(
       tldr: { type: String },
       bullets: [{ type: String }],
       whyItMatters: { type: String },
+      provider: { type: String, enum: ['groq', 'gemini', 'extractive'] },
     },
   },
   {

@@ -38,4 +38,10 @@ describe('Article schema', () => {
     expect(a.validateSync()).toBeUndefined();
     expect(a.sources).toHaveLength(0);
   });
+  it('summary.provider is limited to groq|gemini|extractive', () => {
+    const ok = new Article({ ...valid(), summary: { tldr: 't', bullets: [], provider: 'groq' } });
+    expect(ok.validateSync()).toBeUndefined();
+    const bad = new Article({ ...valid(), summary: { tldr: 't', bullets: [], provider: 'openai' } });
+    expect(bad.validateSync()?.errors['summary.provider']).toBeDefined();
+  });
 });
