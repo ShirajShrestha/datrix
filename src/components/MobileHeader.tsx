@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Zap } from 'lucide-react';
+import { Zap, Settings } from 'lucide-react';
 
 export default function MobileHeader() {
   return (
@@ -21,6 +21,14 @@ export default function MobileHeader() {
           >
             Datrix
           </span>
+        </Link>
+        <Link
+          href="/settings"
+          aria-label="Settings"
+          className="flex items-center justify-center"
+          style={{ width: 36, height: 36, color: 'var(--text-muted)' }}
+        >
+          <Settings className="w-5 h-5" />
         </Link>
       </div>
     </header>

@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import NewsCard, { NewsArticle } from '@/components/NewsCard';
 import { NewsGridSkeleton } from '@/components/Skeletons';
+import { usePrefs, effectiveCategories } from '@/lib/prefs';
+import { useHydrated } from '@/lib/useHydrated';
 
 function SearchContent() {
   const searchParams = useSearchParams();
@@ -13,7 +15,12 @@ function SearchContent() {
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState(query);
 
+  const hydrated = useHydrated();
+  const [prefs] = usePrefs();
+  const chosenKey = effectiveCategories(prefs).join(',');
+
   const fetchNews = useCallback(async (q: string) => {
+    if (!hydrated) return;
     if (!q.trim()) {
       setArticles([]);
       return;
@@ -21,7 +28,7 @@ function SearchContent() {
     
     setLoading(true);
     try {
-      const response = await fetch(`/api/articles?q=${encodeURIComponent(q)}`);
+      const response = await fetch(`/api/articles?q=${encodeURIComponent(q)}&categories=${encodeURIComponent(chosenKey)}`);
       const data = await response.json();
       
       if (data.success) {
@@ -32,7 +39,7 @@ function SearchContent() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [hydrated, chosenKey]);
 
   useEffect(() => {
     const debounce = setTimeout(() => {

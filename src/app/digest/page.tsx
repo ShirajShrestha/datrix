@@ -4,16 +4,23 @@ import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import NewsCard, { NewsArticle } from '@/components/NewsCard';
 import { NewsGridSkeleton } from '@/components/Skeletons';
+import { usePrefs, effectiveCategories } from '@/lib/prefs';
+import { useHydrated } from '@/lib/useHydrated';
 
 export default function DigestPage() {
   const [articles, setArticles] = useState<NewsArticle[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const hydrated = useHydrated();
+  const [prefs] = usePrefs();
+  const chosenKey = effectiveCategories(prefs).join(',');
+
   useEffect(() => {
+    if (!hydrated) return;
     const fetchNews = async () => {
       setLoading(true);
       try {
-        const response = await fetch('/api/articles?limit=50');
+        const response = await fetch(`/api/articles?limit=50&categories=${encodeURIComponent(chosenKey)}`);
         const data = await response.json();
         
         if (data.success) {
@@ -30,7 +37,7 @@ export default function DigestPage() {
     };
 
     fetchNews();
-  }, []);
+  }, [hydrated, chosenKey]);
 
   return (
     <div className="min-h-screen">

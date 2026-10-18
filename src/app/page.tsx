@@ -5,6 +5,9 @@ import FilterBar, { Category, Importance } from '@/components/FilterBar';
 import NewsCard, { NewsArticle } from '@/components/NewsCard';
 import DigestPanel from '@/components/DigestPanel';
 import { NewsGridSkeleton } from '@/components/Skeletons';
+import { usePrefs, effectiveCategories } from '@/lib/prefs';
+import { useHydrated } from '@/lib/useHydrated';
+import { getCategory } from '@/lib/categories';
 
 const SAVED_ARTICLES_KEY = 'newsintel_saved_articles';
 const ITEMS_PER_PAGE = 10;
@@ -32,14 +35,19 @@ export default function Home() {
   const [selectedImportance, setSelectedImportance] = useState<Importance>('all');
   const [currentPage, setCurrentPage] = useState(1);
   
+  const hydrated = useHydrated();
+  const [prefs] = usePrefs();
+  const chosenKey = effectiveCategories(prefs).join(',');
+
   const savedArticles = useLocalStorageStore<NewsArticle[]>(SAVED_ARTICLES_KEY, []);
 
   const fetchNews = useCallback(async () => {
+    if (!hydrated) return;
     setLoading(true);
     try {
       const params = new URLSearchParams();
       if (searchQuery) params.set('q', searchQuery);
-      if (selectedCategory !== 'all') params.set('categories', selectedCategory);
+      params.set('categories', selectedCategory === 'all' ? chosenKey : selectedCategory);
       if (selectedImportance !== 'all') params.set('importance', selectedImportance);
 
       const response = await fetch(`/api/articles?${params.toString()}`);
@@ -55,7 +63,7 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  }, [searchQuery, selectedCategory, selectedImportance]);
+  }, [hydrated, chosenKey, searchQuery, selectedCategory, selectedImportance]);
 
   useEffect(() => {
     fetchNews();
@@ -139,7 +147,7 @@ export default function Home() {
                     color: 'var(--text-primary)',
                   }}
                 >
-                  {selectedCategory === 'all' ? 'Top Stories' : `${selectedCategory.charAt(0).toUpperCase() + selectedCategory.slice(1)}`}
+                  {selectedCategory === 'all' ? 'Top Stories' : getCategory(selectedCategory)?.label ?? selectedCategory}
                 </h1>
                 <div className="flex items-center gap-3">
                   <span 

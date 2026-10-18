@@ -3,8 +3,11 @@
 import { Search, SlidersHorizontal, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { ThemeToggle } from './ThemeToggle';
+import { usePrefs, effectiveCategories } from '@/lib/prefs';
+import { orderedCategories } from '@/lib/categoryPicker';
+import type { CategorySlug } from '@/lib/categories';
 
-export type Category = 'all' | 'ai' | 'tech' | 'economy' | 'world';
+export type Category = 'all' | CategorySlug;
 export type Importance = 'all' | 'high' | 'medium';
 
 interface FilterBarProps {
@@ -14,14 +17,6 @@ interface FilterBarProps {
   selectedCategory: Category;
   selectedImportance: Importance;
 }
-
-const categories: { value: Category; label: string; color: string }[] = [
-  { value: 'all', label: 'All', color: 'var(--text-muted)' },
-  { value: 'ai', label: 'AI', color: 'var(--accent-ai)' },
-  { value: 'tech', label: 'Tech', color: 'var(--accent-tech)' },
-  { value: 'economy', label: 'Economy', color: 'var(--accent-economy)' },
-  { value: 'world', label: 'World', color: 'var(--accent-world)' },
-];
 
 const importanceLevels: { value: Importance; label: string; color: string }[] = [
   { value: 'all', label: 'All', color: 'var(--text-muted)' },
@@ -38,6 +33,14 @@ export default function FilterBar({
 }: FilterBarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilters, setShowFilters] = useState(false);
+  const [prefs] = usePrefs();
+  const categories: { value: Category; label: string }[] = [
+    { value: 'all', label: 'All' },
+    ...orderedCategories(effectiveCategories(prefs)).map((c) => ({
+      value: c.slug as Category,
+      label: `${c.emoji} ${c.label}`,
+    })),
+  ];
 
   useEffect(() => {
     const debounce = setTimeout(() => {
@@ -143,6 +146,7 @@ export default function FilterBar({
                   <button
                     key={cat.value}
                     onClick={() => onCategoryChange(cat.value)}
+                    aria-pressed={selectedCategory === cat.value}
                     style={{
                       padding: '6px 12px',
                       fontSize: 12,

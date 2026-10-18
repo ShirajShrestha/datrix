@@ -3,6 +3,7 @@ import { Playfair_Display, DM_Sans, Inter, Lora } from "next/font/google";
 import "./globals.css";
 import Sidebar from "@/components/Sidebar";
 import MobileNav from "@/components/MobileNav";
+import Onboarding from "@/components/Onboarding";
 import MobileHeader from "@/components/MobileHeader";
 import { ThemeProvider } from "@/components/ThemeProvider";
 
@@ -51,6 +52,7 @@ export default function RootLayout({
               {children}
             </main>
             <MobileNav />
+            <Onboarding />
           </div>
         </ThemeProvider>
       </body>

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
+import { CATEGORIES } from '@/lib/categories';
 import { ChevronRight, Bookmark, ExternalLink, Sparkles, Share2, X } from 'lucide-react';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -41,6 +42,17 @@ const categoryColors: Record<string, { border: string; text: string; bg: string;
 
 categoryColors.technology = categoryColors.tech;
 categoryColors.business = categoryColors.economy;
+
+for (const c of CATEGORIES) {
+  if (categoryColors[c.slug]) continue;
+  categoryColors[c.slug] = {
+    border: c.color,
+    text: c.color,
+    bg: `color-mix(in srgb, ${c.color} 8%, transparent)`,
+    dot: c.color,
+    tint: `color-mix(in srgb, ${c.color} 6%, transparent)`,
+  };
+}
 
 const defaultCategory = { border: 'var(--border-highlight)', text: 'var(--text-muted)', bg: 'transparent', dot: 'var(--text-muted)', tint: 'transparent' };
 

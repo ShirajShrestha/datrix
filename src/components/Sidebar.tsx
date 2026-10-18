@@ -9,24 +9,32 @@ import {
   Bookmark,
   Zap,
   Sparkles,
+  Settings,
 } from 'lucide-react';
+import { usePrefs, effectiveCategories } from '@/lib/prefs';
+import { orderedCategories } from '@/lib/categoryPicker';
+import { useHydrated } from '@/lib/useHydrated';
 
 const navItems = [
   { href: '/', label: 'Feed', icon: Home },
   { href: '/search', label: 'Search', icon: Search },
   { href: '/digest', label: 'Daily Digest', icon: FileText },
   { href: '/saved', label: 'Saved', icon: Bookmark },
-];
-
-const categories = [
-  { href: '/category/ai', label: 'AI', color: 'var(--accent-ai)' },
-  { href: '/category/tech', label: 'Tech', color: 'var(--accent-tech)' },
-  { href: '/category/economy', label: 'Economy', color: 'var(--accent-economy)' },
-  { href: '/category/world', label: 'World', color: 'var(--accent-world)' },
+  { href: '/settings', label: 'Settings', icon: Settings },
 ];
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const hydrated = useHydrated();
+  const [prefs] = usePrefs();
+  const categories = hydrated
+    ? orderedCategories(effectiveCategories(prefs)).map((c) => ({
+        href: `/category/${c.slug}`,
+        label: c.label,
+        emoji: c.emoji,
+        color: c.color,
+      }))
+    : [];
 
   return (
     <aside 
@@ -86,7 +94,7 @@ export default function Sidebar() {
           })}
         </nav>
 
-        <div className="border-t border-[var(--border)] pt-5 mb-6">
+        <div className="border-t border-[var(--border)] pt-5 mb-6 flex-1 min-h-0 overflow-y-auto">
           <h3 
             className="px-3 text-[10px] font-medium mb-3"
             style={{ 
@@ -117,14 +125,9 @@ export default function Sidebar() {
                       style={{ backgroundColor: 'var(--accent-brand)' }}
                     />
                   )}
-                  <span 
-                    className="rounded-full shrink-0" 
-                    style={{ 
-                      backgroundColor: cat.color,
-                      width: 8,
-                      height: 8,
-                    }}
-                  />
+                  <span aria-hidden className="shrink-0" style={{ width: 18, textAlign: 'center', fontSize: 14 }}>
+                    {cat.emoji}
+                  </span>
                   <span 
                     className="text-sm"
                     style={{ 
@@ -141,7 +144,7 @@ export default function Sidebar() {
           </nav>
         </div>
 
-        <div className="mt-auto">
+        <div className="mt-auto pt-2">
           <div 
             className="p-3 rounded-xl border"
             style={{
