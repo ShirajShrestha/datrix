@@ -15,6 +15,7 @@ Datrix aggregates news from RSS feeds and news APIs, removes duplicate stories, 
 - Summaries (TL;DR, key points, why it matters): Groq first, then Gemini Flash, then an extractive fallback. Only articles without an LLM summary are sent to a provider.
 - Installable PWA: offline fallback page and the last loaded feed available offline.
 - Daily Web Push at a time you choose (default 08:00 in your own time zone).
+- Story modal: tap a card for a short brief, an image gallery and links to every outlet (see "Story modal and briefs").
 - Search, daily digest, saved articles (local to the device), dark mode.
 
 ## Categories
@@ -157,6 +158,16 @@ Web Push on iPhone/iPad works only on iOS 16.4+ and only after Share -> Add to H
 - The first ingest after upgrading from the pre-v2 app deletes legacy documents that lack a `categories` field.
 - Existing production `publishedAt` indexes are plain (non-TTL) and stay as they are; expiry uses `expireAt` instead.
 
+## Story modal and briefs
+
+Tapping a card (or "Read more") opens a story modal. The URL gets a `?story=<id>` parameter, so a story can be deep-linked, and closing the modal or pressing Back returns to the feed.
+
+- **What is stored:** the ingest keeps, per article, a short `description` and a per-outlet `snippet` (each capped at 600 characters, HTML tags stripped) plus up to 5 image URLs. No full article bodies are stored or shown; the modal links out to each outlet.
+- **Briefs:** the modal shows "what happened / why it matters / background", generated from the stored snippets on first open by `POST /api/articles/<id>/brief` (Groq first, then Gemini, using the existing `GROQ_API_KEY` / `GEMINI_API_KEY`; no new variables) and cached on the article document. Output is validated (word limits, and any number must appear in the title or snippets the model saw). Cost is bounded to one successful provider call per article: later opens read the cache. A failed attempt is retried at most once a minute (atomic claim on `briefTriedAt`), and while no brief exists the modal falls back to the stored description.
+- **Endpoints:** `GET /api/articles/<id>` returns one article without snippets (`Cache-Control: public, s-maxage=60, stale-while-revalidate=120`). The brief `POST` requires a same-origin `Origin` header.
+- **Saved articles:** the modal's save button uses the same on-device saved list as the cards.
+- **Known limits:** the first open of an uncached story takes about 1-3 s. Stories ingested before this change get snippets and images on the next daily ingest; until then their brief falls back to the single stored description. The production build (`npm run build`) was not re-run as part of this docs/fix task because the dev server shares `.next`; tests, type check and lint were run.
+
 ## Free-tier usage
 
 Counts below come from the code (`src/lib/categories.ts`, source adapters), for one ingest run, which happens once a day.
@@ -186,6 +197,7 @@ fetched 1608, kept 244, created 244, updated 0, summarized 244, llmSummarized 0,
 - Deduplication is token-based. It will not merge aliases such as "Fed" and "Federal Reserve", and occasionally merges two distinct events with near-identical headlines into one card (both outlets' links stay available).
 - Push delivery depends on the GitHub Actions scheduler, which can run late. A push is skipped for the day if the scheduler is down more than 3 hours after the chosen time. The window does not wrap past local midnight.
 - The articles list is served network-first by the service worker (3 s timeout, then a cached copy younger than 6 h, else a 503 `offline` JSON), so a notification tap shows fresh stories whenever the network is up.
+- `/api/articles/<id>` (single story) is served network-first by the service worker like the list, and the brief `POST` is never cached (only GET responses are cacheable).
 - Push sending claims the subscription before sending, so delivery is at-most-once: a crash or push-service error after the claim means no retry that day.
 - Images are hotlinked from publishers. Some may block or break; the card falls back gracefully.
 - The `og:image` fallback fetches publisher pages from the server IP, which some sites may block.
