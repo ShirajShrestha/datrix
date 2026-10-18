@@ -52,7 +52,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const claimed: any = await Article.findOneAndUpdate(
       {
         _id: id,
-        brief: { $exists: false },
+        'brief.whatHappened': { $exists: false },
         $or: [{ briefTriedAt: { $exists: false } }, { briefTriedAt: { $lt: new Date(now.getTime() - RETRY_AFTER_MS) } }],
       },
       { $set: { briefTriedAt: now } },

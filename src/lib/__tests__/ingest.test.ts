@@ -242,6 +242,15 @@ describe('snippets and images', () => {
     const out = sanitizeArticleUrls({ title: 't', source: 'BBC', url: 'https://x.com/a', sources: [{ name: 'B', url: 'http://b.com/x', snippet: 'keep' }] });
     expect(out?.sources).toEqual([{ name: 'B', url: 'http://b.com/x', snippet: 'keep' }]);
   });
+  it('buildOps caps description at 600 chars', () => {
+    const a = { ...mk('u1', 0.8, ['ai']), description: 'word '.repeat(300) };
+    const [op] = buildOps([a], new Map(), new Set(), now);
+    expect((op.updateOne.update.$set as { description: string }).description.length).toBeLessThanOrEqual(600);
+  });
+  it('clampSnippet strips tags only', () => {
+    expect(clampSnippet('<p>Hi <b>there</b></p> &amp; you')).toBe('Hi there &amp; you');
+    expect(clampSnippet('<br/>')).toBeUndefined();
+  });
   it('clampSnippet trims, collapses whitespace, caps at 600 on a word boundary', () => {
     expect(clampSnippet(undefined)).toBeUndefined();
     expect(clampSnippet('  \n ')).toBeUndefined();

@@ -12,7 +12,7 @@ export function pickDescription(a: { description?: string; summary?: { tldr?: st
   const d = typeof a?.description === 'string' ? a.description.trim() : '';
   if (d.length >= 40) return d;
   const t = a?.summary?.tldr;
-  return typeof t === 'string' ? t : '';
+  return typeof t === 'string' ? t.trim() : '';
 }
 
 /** Outlets for the "also reported by" line: deduped by name, primary first. */
@@ -21,14 +21,16 @@ export function sourceLine(
   primary: string,
   max = 4,
 ): { shown: StorySource[]; extra: number } {
+  const key = (n: string) => n.trim().toLowerCase();
   const seen = new Set<string>();
   const unique: StorySource[] = [];
   for (const s of Array.isArray(sources) ? sources : []) {
-    if (!s || typeof s.name !== 'string' || seen.has(s.name)) continue;
-    seen.add(s.name);
-    unique.push(s);
+    if (!s || typeof s.name !== 'string' || !key(s.name) || seen.has(key(s.name))) continue;
+    seen.add(key(s.name));
+    unique.push({ ...s, name: s.name.trim() });
   }
-  const idx = unique.findIndex((s) => s.name === primary);
+  const p = typeof primary === 'string' ? key(primary) : '';
+  const idx = unique.findIndex((s) => key(s.name) === p);
   if (idx > 0) unique.unshift(...unique.splice(idx, 1));
   return { shown: unique.slice(0, max), extra: Math.max(0, unique.length - max) };
 }

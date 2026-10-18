@@ -9,6 +9,10 @@ describe('pickDescription', () => {
   it('falls back to tldr when description is short', () => {
     expect(pickDescription({ description: 'short', summary: { tldr: 'the tldr' } })).toBe('the tldr');
   });
+  it('trims tldr and treats whitespace-only as empty', () => {
+    expect(pickDescription({ summary: { tldr: '  hi  ' } })).toBe('hi');
+    expect(pickDescription({ description: 'short', summary: { tldr: '   ' } })).toBe('');
+  });
   it('returns empty string when nothing available', () => {
     expect(pickDescription({})).toBe('');
     expect(pickDescription({ summary: {} })).toBe('');
@@ -30,6 +34,13 @@ describe('sourceLine', () => {
     const r = sourceLine(s, 'O1');
     expect(r.shown.map((x) => x.name)).toEqual(['O1', 'O0']);
     expect(r.extra).toBe(0);
+  });
+  it('dedupes and matches primary case-insensitively, keeping first-seen name', () => {
+    const s = [{ name: 'BBC', url: 'https://a' }, { name: ' Reuters ', url: 'https://b' }, { name: 'bbc ', url: 'https://c' }, { name: 'reuters', url: 'https://d' }];
+    const r = sourceLine(s, 'REUTERS');
+    expect(r.shown.map((x) => x.name)).toEqual(['Reuters', 'BBC']);
+    expect(r.shown[1].url).toBe('https://a');
+    expect(uniqueSourceNames(s, 'bbc')).toEqual(['BBC', 'Reuters']);
   });
   it('tolerates undefined', () => {
     expect(sourceLine(undefined as never, 'x')).toEqual({ shown: [], extra: 0 });

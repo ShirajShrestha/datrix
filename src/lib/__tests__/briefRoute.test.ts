@@ -15,7 +15,8 @@ vi.mock('@/lib/models/Article', () => ({
     findOneAndUpdate: (filter: any, update: any) => ({
       lean: async () => {
         const d = store[filter._id];
-        if (!d || d.brief) return null;
+        if (!d || d.brief?.whatHappened) return null;
+        expect(filter['brief.whatHappened']).toEqual({ $exists: false });
         const t = d.briefTriedAt as Date | undefined;
         const limit = filter.$or[1].briefTriedAt.$lt as Date;
         if (t && !(t < limit)) return null;

@@ -41,7 +41,7 @@ const SNIPPET_MAX = 600;
 
 /** Trim, collapse whitespace, cap at 600 chars on a word boundary; undefined when empty. */
 export function clampSnippet(s?: string): string | undefined {
-  const t = typeof s === 'string' ? s.replace(/\s+/g, ' ').trim() : '';
+  const t = typeof s === 'string' ? s.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() : '';
   if (!t) return undefined;
   if (t.length <= SNIPPET_MAX) return t;
   const cut = t.slice(0, SNIPPET_MAX);
@@ -104,7 +104,8 @@ export function buildOps(
       updatedAt: now,
     };
     if (a.imageUrl) $set.imageUrl = a.imageUrl;
-    if (a.description) $set.description = a.description;
+    const description = clampSnippet(a.description);
+    if (description) $set.description = description;
     if (a.images?.length) $set.images = a.images;
     // brief/briefTriedAt are owned by the brief generator; never touched here.
     const summary = summaries.get(a.url);

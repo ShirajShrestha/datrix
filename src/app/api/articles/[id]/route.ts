@@ -16,7 +16,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     if (!doc) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 });
     return NextResponse.json(
       { success: true, article: toArticleDTO(doc) },
-      { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600' } },
+      { headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120' } },
     );
   } catch (error) {
     console.error('Article fetch failed:', error instanceof Error ? error.name : 'unknown');

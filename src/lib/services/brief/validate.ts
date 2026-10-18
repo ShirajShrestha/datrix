@@ -3,8 +3,12 @@ import type { Brief, BriefInput } from './index';
 export const MIN_SNIPPET_CHARS = 200;
 const LIMITS = { whatHappened: 90, whyItMatters: 50, background: 60 } as const;
 
+/** Same per-snippet cap the prompt applies, so checks see exactly what the model sees. */
+const MAX_SNIPPET = 600;
+const seenText = (s: { text: string }): string => s.text.slice(0, MAX_SNIPPET);
+
 export function hasEnoughText(input: BriefInput): boolean {
-  return input.snippets.reduce((n, s) => n + s.text.length, 0) >= MIN_SNIPPET_CHARS;
+  return input.snippets.reduce((n, s) => n + seenText(s).length, 0) >= MIN_SNIPPET_CHARS;
 }
 
 function clean(s: string): string {
@@ -44,7 +48,7 @@ export function validateBrief(raw: unknown, input: BriefInput): Omit<Brief, 'pro
     const v = limitWords(clean(o[k] as string), LIMITS[k]);
     if (v) out[k] = v;
   }
-  const allowed = new Set(numbersIn([input.title, ...input.snippets.map((s) => s.text)].join(' ')));
+  const allowed = new Set(numbersIn([input.title, ...input.snippets.map(seenText)].join(' ')));
   const produced = numbersIn([out.whatHappened, out.whyItMatters ?? '', out.background ?? ''].join(' '));
   if (produced.some((n) => !allowed.has(n))) return null;
   return out;

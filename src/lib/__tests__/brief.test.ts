@@ -20,6 +20,17 @@ describe('hasEnoughText', () => {
   });
 });
 
+describe('truncated text parity', () => {
+  it('hasEnoughText counts only the first 600 chars of a snippet', () => {
+    expect(hasEnoughText({ title: 't', snippets: [{ outlet: 'A', text: 'x'.repeat(MIN_SNIPPET_CHARS - 1) + ' '.repeat(1000) + 'y' }] })).toBe(true);
+    expect(hasEnoughText({ title: 't', snippets: [{ outlet: 'A', text: 'x'.repeat(100) }] })).toBe(false);
+  });
+  it('rejects numbers that appear only past the 600-char cut', () => {
+    const inp: BriefInput = { title: 't', snippets: [{ outlet: 'A', text: 'a '.repeat(310) + 'costs 99 dollars' }] };
+    expect(validateBrief({ whatHappened: 'It costs 99 dollars.' }, inp)).toBeNull();
+  });
+});
+
 describe('validateBrief', () => {
   it('accepts a valid brief and ignores extra keys', () => {
     const r = validateBrief({ whatHappened: 'The council approved a budget.', whyItMatters: 'It sets spending.', background: 'Earlier talks.', extra: 'x' }, input);
@@ -32,7 +43,7 @@ describe('validateBrief', () => {
   });
   it('truncates over-long fields on a word boundary', () => {
     const long = Array.from({ length: 200 }, (_, i) => `word${i}`).join(' ');
-    const r = validateBrief({ whatHappened: long, whyItMatters: long, background: long }, { ...input, snippets: [{ outlet: 'A', text: long }] });
+    const r = validateBrief({ whatHappened: long, whyItMatters: long, background: long }, { ...input, snippets: [0, 1, 2, 3].map((i) => ({ outlet: 'A', text: long.slice(i * 600, (i + 1) * 600) })) });
     expect(r!.whatHappened.split(/\s+/).length).toBeLessThanOrEqual(90);
     expect(r!.whyItMatters!.split(/\s+/).length).toBeLessThanOrEqual(50);
     expect(r!.background!.split(/\s+/).length).toBeLessThanOrEqual(60);
