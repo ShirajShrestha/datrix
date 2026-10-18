@@ -57,7 +57,7 @@ function clamp(s: string, n: number): string {
   return s.slice(0, n - 1).replace(/\s+\S*$/, '').trimEnd() + '…';
 }
 
-function extractJson(raw: string): unknown {
+export function extractJson(raw: string): unknown {
   const text = raw.trim();
   const tries: string[] = [text];
   const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
