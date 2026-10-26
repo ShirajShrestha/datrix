@@ -1,26 +1,31 @@
 'use client';
 
 import { useEffect, useReducer, useRef, useState } from 'react';
-import { ExternalLink, Bookmark, Share2, X } from 'lucide-react';
-import { getCategory } from '@/lib/categories';
+import { ExternalLink, Bookmark, Share2, X, ArrowRight, Sparkles } from 'lucide-react';
 import { safeImageUrl } from '@/lib/freshness';
-import { galleryImages, pickDescription, relativeTime, resolveSlugs, sourceLine, uniqueSourceNames } from '@/lib/storyView';
-import {
-  briefReducer, initialBriefState, interpretBriefResponse, shouldFetchBrief,
-} from '@/lib/storyModalState';
+import { galleryImages, relativeTime, resolveSlugs } from '@/lib/storyView';
+import { briefReducer, initialBriefState, interpretBriefResponse, shouldFetchBrief } from '@/lib/storyModalState';
 import { SAVED_CHANGED_EVENT, isSavedId, toggleSavedStored } from '@/lib/savedArticles';
-import type { NewsArticle } from '@/components/NewsCard';
+import { outletInitials } from '@/lib/feedLayout';
+import { useReading } from '@/lib/reading';
+import { shareArticle, sourceNames, summaryLines, type NewsArticle } from '@/components/NewsCard';
+import { HighImpact, ReactionRow, SourceStack, SummaryToggle, isHighImpact, topicLabel } from '@/components/ui';
 
 interface Props {
   article: NewsArticle;
   onClose: () => void;
+  onNext?: () => void;
+  nextTitle?: string;
+  position?: { index: number; total: number };
 }
 
-const label = { fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase' as const, color: 'var(--text-muted)', fontWeight: 600 };
+const sectionLabel: React.CSSProperties = { margin: 0, fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 600 };
 
-export default function StoryModal({ article, onClose }: Props) {
+export default function StoryModal({ article, onClose, onNext, nextTitle, position }: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const prevFocus = useRef<Element | null>(null);
+  const reading = useReading();
+  const mode = reading.summaryMode;
 
   // Open as a true modal; restore focus and unlock scroll on unmount.
   useEffect(() => {
@@ -37,13 +42,29 @@ export default function StoryModal({ article, onClose }: Props) {
     };
   }, []);
 
+  // "J" steps to the next story while the reader is open (ignored while typing).
+  useEffect(() => {
+    if (!onNext) return;
+    const dlg = dialogRef.current;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if ((e.key === 'j' || e.key === 'J') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        onNext();
+      }
+    };
+    dlg?.addEventListener('keydown', onKey);
+    return () => dlg?.removeEventListener('keydown', onKey);
+  }, [onNext]);
+
   // Images
   const [failed, setFailed] = useState<string[]>([]);
   const [sel, setSel] = useState(0);
   const images = galleryImages(article).filter((u) => !failed.includes(u));
   const hero = images[Math.min(sel, images.length - 1)] ?? null;
 
-  // Brief
+  // Brief (detailed, AI-written from all outlets). Fetched once when the reader opens, as before.
   const [brief, dispatch] = useReducer(briefReducer, article, initialBriefState);
   const fetched = useRef(false);
   useEffect(() => {
@@ -60,32 +81,28 @@ export default function StoryModal({ article, onClose }: Props) {
     })();
   }, [brief, article._id]);
 
-  // Save / share
   const [saved, setSaved] = useState(() => isSavedId(article._id));
   useEffect(() => {
     const sync = () => setSaved(isSavedId(article._id));
     window.addEventListener(SAVED_CHANGED_EVENT, sync);
     return () => window.removeEventListener(SAVED_CHANGED_EVENT, sync);
   }, [article._id]);
-  const share = () => {
-    const url = safeImageUrl(article.url) ?? window.location.href;
-    if (navigator.share) navigator.share({ title: article.title, url }).catch(() => {});
-    else navigator.clipboard?.writeText(url).catch(() => {});
-  };
 
   const slugs = resolveSlugs(article);
-  const primaryCat = slugs.length ? getCategory(slugs[0]) : undefined;
   const time = relativeTime(article.publishedAt);
-  const description = pickDescription(article);
   const readUrl = safeImageUrl(article.url);
+  const names = sourceNames(article);
+  const all = Array.isArray(article.sources) && article.sources.length ? article.sources : [{ name: article.source, url: article.url }];
+  const coverage = names.map((n) => all.find((s) => s.name.trim().toLowerCase() === n.toLowerCase()) ?? { name: n, url: '' });
 
-  const all = Array.isArray(article.sources) && article.sources.length
-    ? article.sources
-    : [{ name: article.source, url: article.url }];
-  const { shown, extra } = sourceLine(all, article.source);
-  const fullList = uniqueSourceNames(all, article.source).join(', ');
+  const s = summaryLines(article, mode === 'detailed' ? 'key' : mode);
+  const shortVersion = s.bullets.length ? s.bullets : s.lead ? [s.lead] : [];
+  const why = brief.status === 'ready' ? brief.brief.whyItMatters ?? article.summary?.whyItMatters : article.summary?.whyItMatters;
 
-  const iconBtn = 'p-2 rounded-md transition-all text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]';
+  const btn: React.CSSProperties = {
+    height: 40, padding: '0 14px', borderRadius: 10, border: '1px solid var(--border-highlight)', background: 'transparent',
+    color: 'var(--text-primary)', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer',
+  };
 
   return (
     <dialog
@@ -104,172 +121,187 @@ export default function StoryModal({ article, onClose }: Props) {
         if (e.target === dialogRef.current) onClose();
       }}
     >
-      <div className="story-body" style={{ backgroundColor: 'var(--bg-surface)', color: 'var(--text-primary)' }}>
-        <div className="relative w-full" style={{ aspectRatio: '16 / 9', backgroundColor: 'var(--bg-elevated)' }}>
-          {hero ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={hero}
-              alt=""
-              referrerPolicy="no-referrer"
-              loading="lazy"
-              decoding="async"
-              onError={() => setFailed((f) => [...f, hero])}
-              className="absolute inset-0 w-full h-full object-cover"
-            />
-          ) : (
-            <div className="absolute inset-0 flex items-center justify-center text-5xl" aria-hidden="true">
-              {primaryCat?.emoji ?? '📰'}
-            </div>
-          )}
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close story"
-            className="absolute top-3 right-3 p-2 rounded-full"
-            style={{ backgroundColor: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
-          >
-            <X className="w-4 h-4" />
-          </button>
+      <div className="story-body" style={{ backgroundColor: 'var(--bg-base)', color: 'var(--text-primary)' }}>
+        {/* Top bar */}
+        <div
+          className="flex items-center gap-2 sticky top-0 z-10"
+          style={{ padding: '10px 12px 10px 20px', background: 'var(--bg-base)', borderBottom: '1px solid var(--border)' }}
+        >
+          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+            {position && position.total > 1 ? `Story ${position.index} of ${position.total}` : 'Story'}
+          </span>
+          <div className="ml-auto flex items-center gap-1">
+            <button
+              type="button" onClick={() => toggleSavedStored(article)} aria-label={saved ? 'Remove from saved' : 'Save story'} aria-pressed={saved}
+              style={{ width: 40, height: 40, borderRadius: 10, border: 0, background: 'transparent', cursor: 'pointer', color: saved ? 'var(--accent)' : 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+              <Bookmark className="w-[18px] h-[18px]" fill={saved ? 'currentColor' : 'none'} />
+            </button>
+            <button
+              type="button" onClick={() => shareArticle(article)} aria-label="Share story"
+              style={{ width: 40, height: 40, borderRadius: 10, border: 0, background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+              <Share2 className="w-[18px] h-[18px]" />
+            </button>
+            <button
+              type="button" onClick={onClose} aria-label="Close story"
+              style={{ width: 40, height: 40, borderRadius: 10, border: '1px solid var(--border-highlight)', background: 'var(--bg-surface)', cursor: 'pointer', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+              <X className="w-[18px] h-[18px]" />
+            </button>
+          </div>
         </div>
 
-        <div className="p-4 sm:p-6">
-          <h2 id="story-title" className="font-serif break-words" style={{ fontSize: 22, fontWeight: 600, lineHeight: 1.35, marginBottom: 10 }}>
-            {article.title}
-          </h2>
-
-          <div className="flex items-center flex-wrap mb-4" style={{ gap: 6 }}>
-            {slugs.slice(0, 3).map((slug) => {
-              const def = getCategory(slug);
-              return (
-                <span
-                  key={slug}
-                  style={{ borderColor: def?.color, color: def?.color }}
-                  className="px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] rounded border"
-                >
-                  <span aria-hidden="true">{def?.emoji}</span> {def?.label ?? slug}
-                </span>
-              );
-            })}
-            {time && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{time}</span>}
-          </div>
-
-          {images.length >= 2 && (
-            <div className="flex gap-2 mb-4" role="group" aria-label="Story images">
-              {images.map((u, i) => (
-                <button
-                  key={u}
-                  type="button"
-                  onClick={() => setSel(i)}
-                  aria-label={`Show image ${i + 1}`}
-                  aria-pressed={u === hero}
-                  className="relative overflow-hidden rounded-md shrink-0"
-                  style={{
-                    width: 64, height: 40,
-                    border: `2px solid ${u === hero ? 'var(--accent-brand)' : 'var(--border)'}`,
-                  }}
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={u}
-                    alt=""
-                    referrerPolicy="no-referrer"
-                    loading="lazy"
-                    onError={() => setFailed((f) => [...f, u])}
-                    className="absolute inset-0 w-full h-full object-cover"
-                  />
-                </button>
-              ))}
+        <article className="flex flex-col" style={{ padding: '24px 20px 28px', gap: 24 }}>
+          <header className="flex flex-col" style={{ gap: 14 }}>
+            <div className="kicker flex flex-wrap items-center" style={{ gap: 8, fontSize: 12 }}>
+              {isHighImpact(article.importanceScore) && <HighImpact pulse />}
+              <span>{topicLabel(slugs, 3) || article.source}</span>
+              {time && (
+                <>
+                  <span aria-hidden style={{ opacity: 0.5 }}>/</span>
+                  <span>{time}</span>
+                </>
+              )}
             </div>
+            <h2 id="story-title" style={{ margin: 0, fontWeight: 500, fontSize: 'clamp(28px, 4.4vw, 40px)', lineHeight: 1.12, letterSpacing: '-0.02em', overflowWrap: 'anywhere' }}>
+              {article.title}
+            </h2>
+            <div className="flex flex-wrap items-center" style={{ gap: 10, fontSize: 14, color: 'var(--text-muted)' }}>
+              <SourceStack names={names} size={28} />
+              {names.length > 1 ? `Summarised from ${names.length} sources` : `From ${names[0]}`}
+            </div>
+          </header>
+
+          <SummaryToggle mode={mode} full />
+
+          {mode === 'headlines' ? (
+            <p style={{ margin: 0, fontFamily: 'var(--font-serif)', fontSize: 21, lineHeight: 1.5 }}>{s.lead ?? article.title}</p>
+          ) : (
+            <section aria-labelledby="short-h" className="flex flex-col" style={{ gap: 14, padding: 22, borderRadius: 20, background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+              <h3 id="short-h" className="flex items-center gap-2" style={{ ...sectionLabel, color: 'var(--accent)', fontWeight: 500 }}>
+                <Sparkles className="w-4 h-4" aria-hidden /> The short version
+              </h3>
+              <ol className="flex flex-col" style={{ margin: 0, padding: 0, listStyle: 'none', gap: 12 }}>
+                {shortVersion.map((b, i) => (
+                  <li key={i} className="grid" style={{ gridTemplateColumns: '28px minmax(0,1fr)', gap: 8, fontFamily: 'var(--font-serif)', fontSize: 19, lineHeight: 1.5 }}>
+                    <span className="font-mono tabular-nums" style={{ fontSize: 12, color: 'var(--text-faint)', paddingTop: 6 }}>{String(i + 1).padStart(2, '0')}</span>
+                    {b}
+                  </li>
+                ))}
+              </ol>
+            </section>
           )}
 
-          <div className="mb-4" style={{ fontSize: 15, lineHeight: 1.65, color: 'var(--text-secondary)' }} aria-live="polite">
-            {brief.status === 'loading' && (
-              <div aria-busy="true" aria-label="Loading brief">
-                <div className="skeleton rounded mb-2" style={{ height: 14, width: '95%' }} />
-                <div className="skeleton rounded mb-2" style={{ height: 14, width: '88%' }} />
-                <div className="skeleton rounded mb-2" style={{ height: 14, width: '92%' }} />
-                <div className="skeleton rounded" style={{ height: 14, width: '60%' }} />
+          {mode !== 'headlines' && why && (
+            <section className="grid" style={{ gridTemplateColumns: '4px minmax(0,1fr)', gap: 16 }}>
+              <span aria-hidden style={{ borderRadius: 99, background: 'var(--border-highlight)' }} />
+              <div className="flex flex-col" style={{ gap: 4 }}>
+                <h3 style={sectionLabel}>Why it matters</h3>
+                <p style={{ margin: 0, fontSize: 16, lineHeight: 1.6, color: 'var(--text-secondary)' }}>{why}</p>
               </div>
-            )}
-            {brief.status === 'ready' && (
-              <>
-                <p style={{ color: 'var(--text-primary)', marginBottom: 12 }}>{brief.brief.whatHappened}</p>
-                {brief.brief.whyItMatters && (
-                  <div className="mb-3">
-                    <div style={label}>Why it matters</div>
-                    <p>{brief.brief.whyItMatters}</p>
-                  </div>
-                )}
-                {brief.brief.background && (
-                  <div className="mb-3">
-                    <div style={label}>Background</div>
-                    <p>{brief.brief.background}</p>
-                  </div>
-                )}
-                <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>AI-written from the outlets&apos; own summaries</p>
-              </>
-            )}
-            {brief.status === 'fallback' && <p>{brief.text}</p>}
-            {(brief.status === 'error' || brief.status === 'none') && (
-              <>
-                {(description || article.summary?.tldr) && <p>{description || article.summary?.tldr}</p>}
-                {brief.status === 'error' && (
-                  <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>Couldn&apos;t load the brief</p>
-                )}
-              </>
-            )}
-          </div>
+            </section>
+          )}
 
-          <p
-            title={fullList}
-            style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginBottom: 16 }}
-          >
-            {shown.length <= 1 && extra === 0 ? 'Source: ' : 'Also covered by '}
-            {shown.map((s, i) => {
-              const href = safeImageUrl(s.url);
-              return (
-                <span key={s.name}>
-                  {i > 0 && ' · '}
-                  {href ? (
-                    <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-secondary)', textDecoration: 'underline' }}>
-                      {s.name}
-                    </a>
-                  ) : (
-                    s.name
+          {mode === 'detailed' && (
+            <section className="flex flex-col" style={{ gap: 10 }} aria-live="polite">
+              <h3 style={sectionLabel}>In detail</h3>
+              {brief.status === 'loading' && (
+                <div aria-busy="true" aria-label="Loading the detailed brief">
+                  {[95, 88, 92, 60].map((w) => <div key={w} className="skeleton rounded mb-2" style={{ height: 14, width: `${w}%` }} />)}
+                </div>
+              )}
+              {brief.status === 'ready' && (
+                <>
+                  <p style={{ margin: 0, fontSize: 16, lineHeight: 1.65 }}>{brief.brief.whatHappened}</p>
+                  {brief.brief.background && (
+                    <p style={{ margin: 0, fontSize: 15, lineHeight: 1.6, color: 'var(--text-secondary)' }}>
+                      <strong style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Background: </strong>{brief.brief.background}
+                    </p>
                   )}
-                </span>
+                  <p style={{ margin: 0, fontSize: 12, color: 'var(--text-faint)' }}>AI-written from the outlets&apos; own summaries</p>
+                </>
+              )}
+              {brief.status === 'fallback' && <p style={{ margin: 0, fontSize: 16, lineHeight: 1.65 }}>{brief.text}</p>}
+              {(brief.status === 'error' || brief.status === 'none') && (
+                <p style={{ margin: 0, fontSize: 15, color: 'var(--text-muted)' }}>
+                  {brief.status === 'error' ? 'Couldn’t load the detailed brief right now.' : 'No detailed brief for this story yet.'}
+                </p>
+              )}
+            </section>
+          )}
+
+          {hero && (
+            <figure style={{ margin: 0 }} className="flex flex-col gap-2">
+              <div className="relative w-full overflow-hidden" style={{ aspectRatio: '16 / 9', borderRadius: 16, background: 'var(--bg-elevated)' }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={hero} alt="" referrerPolicy="no-referrer" loading="lazy" decoding="async" onError={() => setFailed((f) => [...f, hero])} className="absolute inset-0 w-full h-full object-cover" />
+              </div>
+              {images.length >= 2 && (
+                <div className="flex gap-2" role="group" aria-label="Story images">
+                  {images.map((u, i) => (
+                    <button
+                      key={u} type="button" onClick={() => setSel(i)} aria-label={`Show image ${i + 1}`} aria-pressed={u === hero}
+                      className="relative overflow-hidden shrink-0"
+                      style={{ width: 64, height: 44, borderRadius: 8, border: `2px solid ${u === hero ? 'var(--accent)' : 'var(--border)'}`, padding: 0, cursor: 'pointer' }}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={u} alt="" referrerPolicy="no-referrer" loading="lazy" onError={() => setFailed((f) => [...f, u])} className="absolute inset-0 w-full h-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </figure>
+          )}
+
+          <section className="flex flex-col" style={{ gap: 10 }}>
+            <h3 style={sectionLabel}>Was this useful?</h3>
+            <ReactionRow id={article._id} current={reading.reactions[article._id]} />
+          </section>
+
+          <section aria-labelledby="cov-h" className="flex flex-col">
+            <h3 id="cov-h" style={{ ...sectionLabel, paddingBottom: 8 }}>Coverage · {coverage.length} {coverage.length === 1 ? 'source' : 'sources'}</h3>
+            {coverage.map((src) => {
+              const href = safeImageUrl(src.url);
+              const inner = (
+                <>
+                  <span style={{ width: 34, height: 34, borderRadius: 8, background: 'var(--bg-elevated)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)' }}>
+                    {outletInitials(src.name)}
+                  </span>
+                  <span style={{ fontSize: 14, fontWeight: 500 }}>{src.name}</span>
+                  {href && <ExternalLink className="w-4 h-4 ml-auto" style={{ color: 'var(--text-faint)' }} aria-hidden />}
+                </>
+              );
+              const rowStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 14, minHeight: 54, borderTop: '1px solid var(--border)', color: 'var(--text-primary)', textDecoration: 'none' };
+              return href ? (
+                <a key={src.name} href={href} target="_blank" rel="noopener noreferrer" style={rowStyle} aria-label={`Read at ${src.name} (opens in new tab)`}>{inner}</a>
+              ) : (
+                <div key={src.name} style={rowStyle}>{inner}</div>
               );
             })}
-            {extra > 0 && ` +${extra}`}
-          </p>
+          </section>
+        </article>
 
-          <div className="flex items-center gap-2 flex-wrap">
-            {readUrl && (
-              <a
-                href={readUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium"
-                style={{ backgroundColor: 'var(--accent-brand)', color: 'var(--bg-surface)' }}
-              >
-                Read original at {article.source}
-                <ExternalLink className="w-4 h-4" aria-hidden="true" />
-              </a>
-            )}
+        {/* Bottom actions */}
+        <div className="sticky bottom-0 flex gap-2.5" style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', background: 'var(--bg-base)' }}>
+          {readUrl && (
+            <a href={readUrl} target="_blank" rel="noopener noreferrer" style={{ ...btn, height: 48, flex: 1, justifyContent: 'center', borderRadius: 12, textDecoration: 'none', fontSize: 14 }}>
+              Read at {article.source} <ExternalLink className="w-4 h-4" aria-hidden />
+            </a>
+          )}
+          {onNext ? (
             <button
-              type="button"
-              onClick={() => toggleSavedStored(article)}
-              aria-label={saved ? 'Remove bookmark' : 'Bookmark article'}
-              aria-pressed={saved}
-              className={`${iconBtn} ${saved ? '!text-[var(--accent-brand)]' : ''}`}
+              type="button" onClick={onNext} title={nextTitle ? `Next: ${nextTitle}` : undefined}
+              style={{ ...btn, height: 48, flex: 1, justifyContent: 'center', borderRadius: 12, border: 0, background: 'var(--accent)', color: 'var(--accent-ink)', fontWeight: 600, fontSize: 14 }}
             >
-              <Bookmark className={`w-4 h-4 ${saved ? 'fill-current' : ''}`} />
+              Next story <ArrowRight className="w-4 h-4" aria-hidden />
+              <span className="hidden sm:inline font-mono" style={{ fontSize: 11, opacity: 0.7, border: '1px solid currentColor', borderRadius: 5, padding: '0 5px' }}>J</span>
             </button>
-            <button type="button" onClick={share} aria-label="Share article" className={iconBtn}>
-              <Share2 className="w-4 h-4" />
+          ) : (
+            <button type="button" onClick={onClose} style={{ ...btn, height: 48, flex: 1, justifyContent: 'center', borderRadius: 12, border: 0, background: 'var(--accent)', color: 'var(--accent-ink)', fontWeight: 600, fontSize: 14 }}>
+              Done
             </button>
-          </div>
+          )}
         </div>
       </div>
     </dialog>

@@ -6,9 +6,10 @@ import type { NewsArticle } from '@/components/NewsCard';
 import StoryModal from '@/components/StoryModal';
 import { buildStoryHref, closeAction, isObjectId, shouldPushStory } from '@/lib/storyModalState';
 import { readSaved } from '@/lib/savedArticles';
+import { markRead } from '@/lib/reading';
 
 export interface StoryModalApi {
-  openStory(a: NewsArticle): void;
+  openStory(a: NewsArticle, queue?: NewsArticle[]): void;
   closeStory(): void;
 }
 
@@ -34,6 +35,7 @@ function StoryUrlSync({ onChange }: { onChange: (id: string | null) => void }) {
 
 export function StoryModalProvider({ children }: { children: React.ReactNode }) {
   const [article, setArticle] = useState<NewsArticle | null>(null);
+  const [queue, setQueue] = useState<NewsArticle[]>([]);
   const articleRef = useRef<NewsArticle | null>(null);
   const pushedRef = useRef(false);
   const reqRef = useRef(0);
@@ -41,6 +43,7 @@ export function StoryModalProvider({ children }: { children: React.ReactNode }) 
   const show = useCallback((a: NewsArticle | null) => {
     articleRef.current = a;
     setArticle(a);
+    if (a) markRead(a);
   }, []);
 
   const pushedIdRef = useRef<string | null>(null);
@@ -55,8 +58,9 @@ export function StoryModalProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   const openStory = useCallback(
-    (a: NewsArticle) => {
+    (a: NewsArticle, q?: NewsArticle[]) => {
       if (!a || typeof a._id !== 'string' || !a._id) return;
+      setQueue(Array.isArray(q) ? q.filter((x) => x && typeof x._id === 'string') : []);
       show(a);
       pushedRef.current = true;
       closingRef.current = false;
@@ -133,6 +137,18 @@ export function StoryModalProvider({ children }: { children: React.ReactNode }) 
     [show, removeParam],
   );
 
+  // Step to the next story in the queue without adding a history entry, so one Back still closes the reader.
+  const idx = article ? queue.findIndex((x) => x._id === article._id) : -1;
+  const nextArticle = idx >= 0 && idx < queue.length - 1 ? queue[idx + 1] : null;
+  const goNext = useCallback(() => {
+    if (!nextArticle) return;
+    show(nextArticle);
+    if (pushedIdRef.current) {
+      pushedIdRef.current = nextArticle._id;
+      window.history.replaceState(null, '', buildStoryHref(window.location.pathname, window.location.search, nextArticle._id));
+    }
+  }, [nextArticle, show]);
+
   const api = useMemo(() => ({ openStory, closeStory }), [openStory, closeStory]);
 
   return (
@@ -141,7 +157,16 @@ export function StoryModalProvider({ children }: { children: React.ReactNode }) 
       <Suspense fallback={null}>
         <StoryUrlSync onChange={onUrlChange} />
       </Suspense>
-      {article && <StoryModal key={article._id} article={article} onClose={closeStory} />}
+      {article && (
+        <StoryModal
+          key={article._id}
+          article={article}
+          onClose={closeStory}
+          onNext={nextArticle ? goNext : undefined}
+          nextTitle={nextArticle?.title}
+          position={idx >= 0 ? { index: idx + 1, total: queue.length } : undefined}
+        />
+      )}
     </StoryModalContext.Provider>
   );
 }

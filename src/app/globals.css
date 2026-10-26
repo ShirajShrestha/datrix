@@ -1,214 +1,171 @@
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:wght@400;500;600&family=Inter:wght@400;500;600&family=Lora:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
+/* Datrix design tokens. Variable names from v1 are kept so existing pages pick up the new look. */
 :root, .light {
-  --bg-base: #fcfcfc;
-  --bg-surface: #ffffff;
-  --bg-elevated: #f5f5f5;
-  --bg-sidebar: #ffffff;
-  --border: #e5e5e5;
-  --border-highlight: #d4d4d4;
-  --text-primary: #1a1a1a;
-  --text-secondary: #52525b;
-  --text-muted: #a1a1aa;
-  --accent-high: #dc2626;
-  --accent-medium: #d97706;
-  --accent-world: #2563eb;
-  --accent-economy: #059669;
-  --accent-ai: #9333ea;
-  --accent-tech: #0891b2;
-  --accent-brand: #4f46e5;
-  --cat-ai: #9333ea;
-  --cat-technology: #0891b2;
-  --cat-business: #059669;
-  --cat-world: #2563eb;
-  --cat-geopolitics: #4338ca;
-  --cat-politics: #dc2626;
-  --cat-law: #b45309;
-  --cat-science: #0d9488;
-  --cat-health: #db2777;
-  --cat-environment: #65a30d;
-  --cat-sports: #ea580c;
-  --cat-entertainment: #c026d3;
-  --cat-education: #0284c7;
-  --cat-society: #e11d48;
-  --font-sans: 'Inter', sans-serif;
-  --font-serif: 'Lora', Georgia, serif;
-  --font-display: 'Playfair Display', Georgia, serif;
-  --glass-bg: rgba(255, 255, 255, 0.7);
-  --glass-border: rgba(0, 0, 0, 0.08);
+  --bg-base: #F7F7F5;
+  --bg-sidebar: #F0F0EC;
+  --bg-surface: #FFFFFF;
+  --bg-elevated: #EFEFEA;
+  --bg-raised: #E6E6E0;
+  --border: #E3E3DD;
+  --border-highlight: #D2D2CA;
+  --text-primary: #16171A;
+  --text-secondary: #474A52;
+  --text-muted: #5E626B;
+  --text-faint: #6E727B;
+
+  --accent: #4B50D6;
+  --accent-ink: #FFFFFF;
+  --accent-soft: #E9EAFC;
+  --hot: #C2410C;
+  --hot-soft: #FCE9DF;
+  --hot-border: #F2C7B0;
+  --good: #0F7A55;
+  --good-soft: #DDF3EA;
+  --amber: #A15C00;
+  --amber-soft: #FBEFD9;
+  --amber-border: #EBCF9F;
+
+  /* Topic tones: one muted hue per topic, used for dots, rings and card tints only. */
+  --tone-world: #4B50D6;
+  --tone-politics: #A15C00;
+  --tone-sports: #0F7A6B;
+  --tone-business: #8A3FB8;
+  --tone-health: #0F7A55;
+  --tone-science: #0369A1;
+  --tone-tech: #4F5B6E;
+  --tone-other: #6E727B;
+
+  /* v1 aliases */
+  --accent-brand: var(--accent);
+  --accent-high: var(--hot);
+  --accent-medium: var(--amber);
+  --cat-ai: var(--tone-tech);
+  --cat-technology: var(--tone-tech);
+  --cat-business: var(--tone-business);
+  --cat-world: var(--tone-world);
+  --cat-geopolitics: var(--tone-world);
+  --cat-politics: var(--tone-politics);
+  --cat-law: var(--tone-politics);
+  --cat-science: var(--tone-science);
+  --cat-health: var(--tone-health);
+  --cat-environment: var(--tone-health);
+  --cat-sports: var(--tone-sports);
+  --cat-entertainment: var(--tone-business);
+  --cat-education: var(--tone-science);
+  --cat-society: var(--tone-other);
 }
 
 .dark {
-  --bg-base: #0a0a0c;
-  --bg-surface: #111114;
-  --bg-elevated: #18181b;
-  --bg-sidebar: #0f0f12;
-  --border: #1e1e24;
-  --border-highlight: #2a2a32;
-  --text-primary: #fafafa;
-  --text-secondary: #a1a1aa;
-  --text-muted: #71717a;
-  --accent-high: #ef4444;
-  --accent-medium: #f59e0b;
-  --accent-world: #3b82f6;
-  --accent-economy: #10b981;
-  --accent-ai: #a855f7;
-  --accent-tech: #06b6d4;
-  --accent-brand: #6366f1;
-  --cat-ai: #a855f7;
-  --cat-technology: #06b6d4;
-  --cat-business: #10b981;
-  --cat-world: #3b82f6;
-  --cat-geopolitics: #6366f1;
-  --cat-politics: #ef4444;
-  --cat-law: #d97706;
-  --cat-science: #14b8a6;
-  --cat-health: #ec4899;
-  --cat-environment: #84cc16;
-  --cat-sports: #f97316;
-  --cat-entertainment: #d946ef;
-  --cat-education: #0ea5e9;
-  --cat-society: #f43f5e;
-  --font-sans: 'Inter', sans-serif;
-  --font-serif: 'Lora', Georgia, serif;
-  --font-display: 'Playfair Display', Georgia, serif;
-  --glass-bg: rgba(17, 17, 20, 0.8);
-  --glass-border: rgba(255, 255, 255, 0.06);
-}
+  --bg-base: #0B0C0F;
+  --bg-sidebar: #0E1013;
+  --bg-surface: #121419;
+  --bg-elevated: #1A1D24;
+  --bg-raised: #23262E;
+  --border: #1F2229;
+  --border-highlight: #2A2E37;
+  --text-primary: #EEF0F3;
+  --text-secondary: #C4C9D2;
+  --text-muted: #A7ADB8;
+  --text-faint: #838A96;
 
-*, *::before, *::after {
-  transition: background-color 250ms ease, 
-              border-color 250ms ease, 
-              color 150ms ease,
-              box-shadow 250ms ease;
-}
+  --accent: #8B90FF;
+  --accent-ink: #0B0C0F;
+  --accent-soft: #16182A;
+  --hot: #FF8A6B;
+  --hot-soft: #24150F;
+  --hot-border: #3A2A27;
+  --good: #8FD9B6;
+  --good-soft: #13231D;
+  --amber: #F5B454;
+  --amber-soft: #1A1510;
+  --amber-border: #3A2E22;
 
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--bg-elevated) transparent;
-}
-
-*::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
-}
-
-*::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-*::-webkit-scrollbar-thumb {
-  background: var(--bg-elevated);
-  border-radius: 2px;
-}
-
-*::-webkit-scrollbar-thumb:hover {
-  background: var(--border-highlight);
+  --tone-world: #8B90FF;
+  --tone-politics: #F5B454;
+  --tone-sports: #6FD3C0;
+  --tone-business: #D6A6F2;
+  --tone-health: #8FD9B6;
+  --tone-science: #7CC4F2;
+  --tone-tech: #A9B4C6;
+  --tone-other: #9AA0AA;
 }
 
 body {
   background: var(--bg-base);
   color: var(--text-primary);
-  font-family: var(--font-sans), sans-serif;
-  position: relative;
+  font-family: var(--font-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
-  pointer-events: none;
-  z-index: 9999;
-  opacity: 0.35;
+.font-sans { font-family: var(--font-sans), system-ui, sans-serif; }
+.font-serif, .headline { font-family: var(--font-serif), Georgia, serif; }
+.font-mono { font-family: var(--font-mono), ui-monospace, monospace; }
+h1, h2, h3 { font-family: var(--font-serif), Georgia, serif; }
+
+/* Small uppercase label used for kickers and section eyebrows. */
+.kicker {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
 }
 
-.light body::before {
-  opacity: 0.2;
-}
+* { scrollbar-width: thin; scrollbar-color: var(--bg-raised) transparent; }
 
-.font-sans {
-  font-family: var(--font-sans), sans-serif;
+a, button { -webkit-tap-highlight-color: transparent; }
+input:focus-visible, button:focus-visible, a:focus-visible, select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
-
-.font-serif {
-  font-family: var(--font-serif), Georgia, serif;
-}
-
-.font-display {
-  font-family: var(--font-display), Georgia, serif;
-}
-
-h1, h2, h3, h4, h5, h6 {
-  font-family: var(--font-serif), Georgia, serif;
-}
-
-.headline {
-  font-family: var(--font-serif), Georgia, serif;
-}
-
-.glass {
-  background: var(--glass-bg);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--glass-border);
-}
+.tabular-nums { font-variant-numeric: tabular-nums; }
 
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
 }
-
 .skeleton {
   background: linear-gradient(90deg, var(--bg-surface) 25%, var(--bg-elevated) 50%, var(--bg-surface) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
 }
 
-@keyframes fadeInUp {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
+@keyframes dx-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--hot) 55%, transparent); }
+  70% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--hot) 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
 }
+.dx-pulse { animation: dx-pulse 1.8s ease-out infinite; }
 
-.animate-fade-in-up {
-  animation: fadeInUp 0.4s ease-out forwards;
+@keyframes dx-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
 }
+.dx-rise { animation: dx-rise 0.35s ease-out both; }
 
-@keyframes pulse-bookmark {
-  0% { transform: scale(1); }
-  50% { transform: scale(1.3); }
+@keyframes dx-pop {
+  0% { transform: scale(0.8); opacity: 0; }
+  60% { transform: scale(1.06); opacity: 1; }
   100% { transform: scale(1); }
 }
+.dx-pop { animation: dx-pop 0.45s ease-out both; }
 
-.animate-pulse-bookmark {
-  animation: pulse-bookmark 0.3s ease-out;
+@media (prefers-reduced-motion: reduce) {
+  .dx-pulse, .dx-rise, .dx-pop, .skeleton { animation: none; }
 }
 
-input:focus,
-button:focus-visible,
-a:focus-visible {
-  outline: 2px solid var(--accent-brand);
-  outline-offset: 2px;
+/* Story card: importance column on wider screens, single column on phones. */
+.story-grid { grid-template-columns: 44px minmax(0, 1fr); }
+.story-rank { display: flex; }
+@media (max-width: 639px) {
+  .story-grid { grid-template-columns: minmax(0, 1fr); }
+  .story-rank { display: none; }
 }
 
-.tabular-nums {
-  font-variant-numeric: tabular-nums;
-}
-
-.card-actions {
-  opacity: 0;
-  transition: opacity 150ms ease;
-}
-
-.group:hover .card-actions,
-.card-actions:focus-within {
-  opacity: 1;
-}
-
-@media (hover: none) {
-  .card-actions { opacity: 1; }
-}
+/* Hide horizontal scrollbars on chip rows while keeping them scrollable. */
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
 
 /* Story modal */
 body.story-open { overflow: hidden; }
@@ -217,15 +174,16 @@ body.story-open { overflow: hidden; }
   border: 1px solid var(--border);
   background: transparent;
   color: inherit;
-  width: min(720px, 100vw);
+  width: min(760px, 100vw);
   max-width: 100vw;
-  max-height: 90dvh;
+  max-height: 92dvh;
   margin: auto;
   overflow: hidden;
-  border-radius: 12px;
+  border-radius: 20px;
 }
-.story-dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
-.story-body { max-height: 90dvh; overflow-y: auto; overscroll-behavior: contain; }
+.story-dialog::backdrop { background: rgba(5, 6, 8, 0.7); }
+.story-body { max-height: 92dvh; overflow-y: auto; overscroll-behavior: contain; }
 @media (max-width: 639px) {
-  .story-dialog { margin: auto 0 0 0; width: 100vw; border-radius: 16px 16px 0 0; }
+  .story-dialog { margin: auto 0 0 0; width: 100vw; max-height: 96dvh; border-radius: 20px 20px 0 0; }
+  .story-body { max-height: 96dvh; }
 }

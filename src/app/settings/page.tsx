@@ -7,14 +7,16 @@ import { currentTimeZone, disablePush, enablePush, getPushSupport, hasPushSubscr
 import { useHydrated } from '@/lib/useHydrated';
 import CategoryPicker from '@/components/CategoryPicker';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { SummaryStylePicker } from '@/components/Onboarding';
+import { clearReading, setGoal, useReading } from '@/lib/reading';
 
 const SAVED_ARTICLES_KEY = 'newsintel_saved_articles';
 
 const sectionStyle: React.CSSProperties = {
   background: 'var(--bg-surface)',
   border: '1px solid var(--border)',
-  borderRadius: 12,
-  padding: 20,
+  borderRadius: 20,
+  padding: 22,
 };
 const h2Style: React.CSSProperties = {
   fontSize: 16,
@@ -25,9 +27,10 @@ const h2Style: React.CSSProperties = {
 };
 const hintStyle: React.CSSProperties = { fontSize: 13, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' };
 const btn: React.CSSProperties = {
-  padding: '7px 14px',
+  minHeight: 40,
+  padding: '0 14px',
   fontSize: 13,
-  borderRadius: 8,
+  borderRadius: 10,
   background: 'var(--bg-elevated)',
   color: 'var(--text-secondary)',
   border: '1px solid var(--border-highlight)',
@@ -197,6 +200,35 @@ function NotificationsSection() {
   );
 }
 
+function ReadingSection() {
+  const hydrated = useHydrated();
+  const { goal } = useReading();
+  const [cleared, setCleared] = useState(false);
+  const stepBtn: React.CSSProperties = { ...btn, width: 44, height: 44, padding: 0, fontSize: 18 };
+  return (
+    <section style={sectionStyle} aria-labelledby="set-reading" className="flex flex-col gap-6">
+      <div>
+        <h2 id="set-reading" style={h2Style}>Reading</h2>
+        <p style={hintStyle}>Kept on this device only.</p>
+      </div>
+      {hydrated && <SummaryStylePicker />}
+      <div className="flex flex-wrap items-center gap-3">
+        <span style={{ fontSize: 14, fontWeight: 600, marginRight: 'auto' }}>Daily goal</span>
+        <button type="button" style={stepBtn} aria-label="Fewer stories per day" onClick={() => setGoal(goal - 1)} disabled={!hydrated || goal <= 1}>−</button>
+        <span className="tabular-nums" style={{ minWidth: 92, textAlign: 'center', fontSize: 14 }} aria-live="polite">
+          {hydrated ? goal : '–'} {goal === 1 ? 'story' : 'stories'}
+        </span>
+        <button type="button" style={stepBtn} aria-label="More stories per day" onClick={() => setGoal(goal + 1)} disabled={!hydrated || goal >= 20}>+</button>
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <span style={{ ...hintStyle, marginRight: 'auto' }}>Clears read history, streak and reactions.</span>
+        <button type="button" style={btn} onClick={() => { clearReading(); setCleared(true); }}>Reset reading history</button>
+        {cleared && <span role="status" style={hintStyle}>Reset.</span>}
+      </div>
+    </section>
+  );
+}
+
 export default function SettingsPage() {
   const hydrated = useHydrated();
   const [prefs, setPrefs] = usePrefs();
@@ -205,16 +237,16 @@ export default function SettingsPage() {
     <div className="min-h-screen">
       <div className="max-w-3xl mx-auto px-4 py-6 flex flex-col gap-5">
         <div className="flex items-center justify-between">
-          <h1 className="font-serif" style={{ fontSize: 24, fontWeight: 700, color: 'var(--text-primary)' }}>
+          <h1 style={{ margin: 0, fontSize: 36, fontWeight: 500, letterSpacing: '-0.02em', color: 'var(--text-primary)' }}>
             Settings
           </h1>
-          <Link href="/" style={{ fontSize: 14, color: 'var(--accent-brand)', fontFamily: 'var(--font-sans)' }}>
-            Back to Home
+          <Link href="/" style={{ fontSize: 14, color: 'var(--accent)', fontFamily: 'var(--font-sans)' }}>
+            Back to Today
           </Link>
         </div>
 
         <section style={sectionStyle} aria-labelledby="set-cats">
-          <h2 id="set-cats" style={h2Style}>Categories</h2>
+          <h2 id="set-cats" style={h2Style}>Topics</h2>
           <p style={{ ...hintStyle, marginBottom: 12 }}>
             Choose what appears in your feed. Nothing selected shows everything.
           </p>
@@ -224,6 +256,8 @@ export default function SettingsPage() {
             <div style={{ height: 200 }} />
           )}
         </section>
+
+        <ReadingSection />
 
         <NotificationsSection />
 

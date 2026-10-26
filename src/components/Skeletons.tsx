@@ -2,33 +2,20 @@
 
 export default function NewsCardSkeleton() {
   return (
-    <div className="bg-[var(--bg-surface)] border-b border-[var(--border)] p-4 sm:p-5 animate-pulse">
-      <div className="flex flex-col sm:flex-row gap-4">
-        <div className="w-full sm:w-44 shrink-0 bg-[var(--bg-elevated)] rounded-lg" style={{ aspectRatio: '16 / 9' }} />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="h-5 w-12 bg-[var(--bg-elevated)] rounded-sm" />
-            <div className="h-5 w-16 bg-[var(--bg-elevated)] rounded-sm" />
-          </div>
-          <div className="h-[22px] bg-[var(--bg-elevated)] rounded w-full mb-2" />
-          <div className="h-[22px] bg-[var(--bg-elevated)] rounded w-3/4 mb-3" />
-          <div className="h-4 bg-[var(--bg-elevated)] rounded w-5/6 mb-4" />
-          <div className="flex items-center gap-2">
-            <div className="h-3 w-16 bg-[var(--bg-elevated)] rounded" />
-            <div className="h-3 w-12 bg-[var(--bg-elevated)] rounded" />
-          </div>
-        </div>
-      </div>
+    <div style={{ borderRadius: 20, padding: 22, background: 'var(--bg-surface)', border: '1px solid var(--border)' }} aria-hidden>
+      <div className="skeleton rounded" style={{ height: 12, width: 140, marginBottom: 14 }} />
+      <div className="skeleton rounded" style={{ height: 22, width: '92%', marginBottom: 8 }} />
+      <div className="skeleton rounded" style={{ height: 22, width: '70%', marginBottom: 16 }} />
+      <div className="skeleton rounded" style={{ height: 14, width: '85%', marginBottom: 8 }} />
+      <div className="skeleton rounded" style={{ height: 14, width: '60%' }} />
     </div>
   );
 }
 
 export function NewsGridSkeleton({ count = 6 }: { count?: number }) {
   return (
-    <div className="flex flex-col">
-      {Array.from({ length: count }).map((_, i) => (
-        <NewsCardSkeleton key={i} />
-      ))}
+    <div className="flex flex-col" style={{ gap: 12 }} aria-busy="true" aria-label="Loading stories">
+      {Array.from({ length: count }).map((_, i) => <NewsCardSkeleton key={i} />)}
     </div>
   );
 }

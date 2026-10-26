@@ -1,13 +1,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { CATEGORIES, getCategory } from '@/lib/categories';
-import { usePreviousVisit } from '@/lib/prefs';
-import { isNewSince, safeImageUrl } from '@/lib/freshness';
-import { pickDescription, relativeTime, resolveSlugs } from '@/lib/storyView';
-import { SAVED_CHANGED_EVENT, isSavedId, notifySavedChanged, toggleSavedStored } from '@/lib/savedArticles';
+import { Bookmark, Share2, Check, ArrowRight } from 'lucide-react';
+import { safeImageUrl } from '@/lib/freshness';
+import { pickDescription, relativeTime, resolveSlugs, uniqueSourceNames } from '@/lib/storyView';
+import { SAVED_CHANGED_EVENT, isSavedId, toggleSavedStored } from '@/lib/savedArticles';
+import { useReading, type SummaryMode } from '@/lib/reading';
+import { cleanQuote } from '@/lib/highlights';
+import type { CardVariant } from '@/lib/feedLayout';
 import { useStoryModal } from '@/components/StoryModalProvider';
-import { Bookmark, Share2 } from 'lucide-react';
+import { HighImpact, ImportanceBars, SourceStack, isHighImpact, topicLabel, topicTone } from '@/components/ui';
 
 export interface NewsArticle {
   _id: string;
@@ -37,235 +39,267 @@ export interface NewsArticle {
 interface NewsCardProps {
   article: NewsArticle;
   onSave?: (article: NewsArticle) => void;
+  variant?: CardVariant | 'compact';
+  figure?: string;
+  quote?: string;
+  rank?: number;
+  /** Stories to step through with "Next story" in the reader. */
+  queue?: NewsArticle[];
 }
 
-type CatStyle = { border: string; text: string; bg: string; dot: string; tint: string };
-
-// Map keyed by registry slug: prototype-safe (no 'constructor' / '__proto__' hits).
-const categoryColors = new Map<string, CatStyle>();
-for (const c of CATEGORIES) {
-  categoryColors.set(c.slug, {
-    border: c.color,
-    text: c.color,
-    bg: `color-mix(in srgb, ${c.color} 8%, transparent)`,
-    dot: c.color,
-    tint: `color-mix(in srgb, ${c.color} 6%, transparent)`,
-  });
+/** Bullets for the current summary length; always returns something readable. */
+export function summaryLines(a: NewsArticle, mode: SummaryMode): { lead?: string; bullets: string[]; why?: string } {
+  const tldr = a.summary?.tldr?.trim();
+  const bullets = Array.isArray(a.summary?.bullets) ? a.summary!.bullets.filter((b) => typeof b === 'string' && b.trim()).slice(0, 3) : [];
+  const fallback = tldr || pickDescription(a);
+  if (mode === 'headlines') return { lead: fallback || undefined, bullets: [] };
+  if (mode === 'key') return bullets.length ? { bullets } : { lead: fallback || undefined, bullets: [] };
+  return { lead: fallback || undefined, bullets, why: a.summary?.whyItMatters || a.brief?.whyItMatters };
 }
 
-const defaultCategory: CatStyle = { border: 'var(--border-highlight)', text: 'var(--text-muted)', bg: 'transparent', dot: 'var(--text-muted)', tint: 'transparent' };
+export function sourceNames(a: NewsArticle): string[] {
+  const all = Array.isArray(a.sources) && a.sources.length ? a.sources : [{ name: a.source, url: a.url }];
+  return uniqueSourceNames(all, a.source);
+}
 
-export default function NewsCard({ article, onSave }: NewsCardProps) {
-  const [isSaved, setIsSaved] = useState(article.isSaved || false);
-  const [bookmarkAnimating, setBookmarkAnimating] = useState(false);
-  // Track the URL that failed (not a boolean) so a changed imageUrl gets a fresh attempt.
-  const [failedImg, setFailedImg] = useState<string | null>(null);
-  const previousVisit = usePreviousVisit();
-  const { openStory } = useStoryModal();
-
-  const isHigh = article.importanceScore >= 0.75;
-  const isMedium = article.importanceScore >= 0.5;
-
-  const slugs = resolveSlugs(article);
-  const primary = slugs.length ? getCategory(slugs[0]) : undefined;
-  const categoryStyle = (primary && categoryColors.get(primary.slug)) || defaultCategory;
-  const extraCount = Math.max(0, slugs.length - 2);
-
-  const imageSrc = safeImageUrl(article.imageUrl);
-  const showImage = imageSrc !== null && failedImg !== imageSrc;
-  const time = relativeTime(article.publishedAt);
-  const isNew = isNewSince(article.publishedAt, previousVisit);
-
-  const sourceCount = Array.isArray(article.sources) ? article.sources.length : 0;
-
-  const description = pickDescription(article);
-
+function useSaved(id: string, initial?: boolean) {
+  const [saved, setSaved] = useState(initial ?? false);
   useEffect(() => {
-    const sync = () => setIsSaved(isSavedId(article._id));
+    const sync = () => setSaved(isSavedId(id));
     sync();
     window.addEventListener(SAVED_CHANGED_EVENT, sync);
     return () => window.removeEventListener(SAVED_CHANGED_EVENT, sync);
-  }, [article._id]);
+  }, [id]);
+  return saved;
+}
 
-  const handleSave = () => {
-    setIsSaved(!isSaved);
-    setBookmarkAnimating(true);
-    setTimeout(() => setBookmarkAnimating(false), 300);
-    if (onSave) onSave(article);
-    else toggleSavedStored(article);
-    notifySavedChanged();
+export function shareArticle(a: NewsArticle) {
+  const url = safeImageUrl(a.url) ?? window.location.href;
+  if (navigator.share) navigator.share({ title: a.title, url }).catch(() => {});
+  else navigator.clipboard?.writeText(url).catch(() => {});
+}
+
+const iconBtn: React.CSSProperties = {
+  width: 40, height: 40, borderRadius: 10, border: 0, background: 'transparent', cursor: 'pointer',
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+};
+
+export function CardActions({ article, onSave }: { article: NewsArticle; onSave?: (a: NewsArticle) => void }) {
+  const saved = useSaved(article._id, article.isSaved);
+  return (
+    <div className="flex items-center gap-0.5">
+      <button
+        type="button"
+        aria-label={saved ? 'Remove from saved' : 'Save story'}
+        aria-pressed={saved}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (onSave) onSave(article);
+          else toggleSavedStored(article);
+        }}
+        style={{ ...iconBtn, color: saved ? 'var(--accent)' : 'var(--text-muted)' }}
+      >
+        <Bookmark className="w-[18px] h-[18px]" fill={saved ? 'currentColor' : 'none'} />
+      </button>
+      <button
+        type="button"
+        aria-label="Share story"
+        onClick={(e) => {
+          e.stopPropagation();
+          shareArticle(article);
+        }}
+        style={{ ...iconBtn, color: 'var(--text-muted)' }}
+      >
+        <Share2 className="w-[18px] h-[18px]" />
+      </button>
+    </div>
+  );
+}
+
+function ReadBadge() {
+  return (
+    <span className="inline-flex items-center gap-1" style={{ color: 'var(--good)' }}>
+      <Check className="w-3.5 h-3.5" strokeWidth={2.6} aria-hidden />
+      Read
+    </span>
+  );
+}
+
+function Bullets({ items, size = 15 }: { items: string[]; size?: number }) {
+  return (
+    <ul className="flex flex-col" style={{ gap: 8, margin: 0, padding: 0, listStyle: 'none' }}>
+      {items.map((b, i) => (
+        <li key={i} className="grid" style={{ gridTemplateColumns: '14px minmax(0,1fr)', gap: 6, fontSize: size, lineHeight: 1.55, color: 'var(--text-secondary)' }}>
+          <span aria-hidden style={{ width: 5, height: 5, borderRadius: 99, background: 'var(--accent)', marginTop: size * 0.6, display: 'block' }} />
+          {b}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export function SummaryBlock({ article, mode, size = 15 }: { article: NewsArticle; mode: SummaryMode; size?: number }) {
+  const s = summaryLines(article, mode);
+  return (
+    <div className="flex flex-col" style={{ gap: 10 }}>
+      {s.lead && (
+        <p className={mode === 'headlines' ? 'line-clamp-2' : ''} style={{ margin: 0, fontSize: size, lineHeight: 1.6, color: 'var(--text-secondary)' }}>
+          {s.lead}
+        </p>
+      )}
+      {s.bullets.length > 0 && <Bullets items={s.bullets} size={size} />}
+      {s.why && (
+        <p style={{ margin: 0, fontSize: size - 1, lineHeight: 1.55, color: 'var(--text-muted)' }}>
+          <strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>Why it matters: </strong>
+          {s.why}
+        </p>
+      )}
+    </div>
+  );
+}
+
+export default function NewsCard({ article, onSave, variant = 'standard', figure, quote, rank, queue }: NewsCardProps) {
+  const { openStory } = useStoryModal();
+  const reading = useReading();
+  const read = reading.log.some((e) => e.id === article._id);
+  const slugs = resolveSlugs(article);
+  const time = relativeTime(article.publishedAt);
+  const names = sourceNames(article);
+  const open = () => openStory(article, queue);
+  const high = isHighImpact(article.importanceScore);
+  const tone = topicTone(slugs[0]);
+
+  const titleBtn = (size: number, extra?: React.CSSProperties) => (
+    <h3 style={{ margin: 0, fontFamily: 'var(--font-serif)', fontWeight: 500, fontSize: size, lineHeight: 1.25, letterSpacing: '-0.01em', ...extra }}>
+      <button type="button" onClick={open} aria-haspopup="dialog" className="text-left cursor-pointer" style={{ background: 'none', border: 0, padding: 0, margin: 0, color: 'inherit', font: 'inherit', cursor: 'pointer', overflowWrap: 'anywhere' }}>
+        {article.title}
+      </button>
+    </h3>
+  );
+
+  const kicker = (prefix?: string) => (
+    <div className="kicker flex flex-wrap items-center" style={{ gap: 8 }}>
+      {high && variant !== 'compact' && <HighImpact />}
+      <span style={{ color: prefix ? tone : undefined }}>{prefix ? `${prefix} · ` : ''}{topicLabel(slugs) || article.source}</span>
+      {time && (
+        <>
+          <span aria-hidden style={{ opacity: 0.5 }}>/</span>
+          <span>{time.replace('about ', '')}</span>
+        </>
+      )}
+      {variant === 'standard' && (
+        <span className="sm:hidden" style={{ marginLeft: read ? undefined : 'auto' }}>
+          <ImportanceBars score={article.importanceScore} vertical={false} />
+        </span>
+      )}
+      {read && (
+        <span style={{ marginLeft: 'auto' }}>
+          <ReadBadge />
+        </span>
+      )}
+    </div>
+  );
+
+  const shell: React.CSSProperties = {
+    borderRadius: 20, padding: 22, display: 'flex', flexDirection: 'column', gap: 12,
+    opacity: read ? 0.62 : 1, transition: 'opacity 200ms ease', height: '100%', boxSizing: 'border-box',
   };
+  const tinted = (c: string): React.CSSProperties => ({
+    background: `color-mix(in srgb, ${c} 9%, var(--bg-surface))`,
+    border: `1px solid color-mix(in srgb, ${c} 26%, var(--bg-surface))`,
+  });
 
-  const handleShare = () => {
-    if (typeof navigator !== 'undefined' && navigator.share) {
-      navigator.share({ title: article.title, url: article.url }).catch(() => {});
-    }
-  };
+  if (variant === 'figure' && figure) {
+    return (
+      <article className="dx-rise" style={{ ...shell, ...tinted('var(--tone-business)') }}>
+        {kicker('By the numbers')}
+        <span aria-hidden style={{ fontFamily: 'var(--font-serif)', fontSize: 'clamp(56px, 8vw, 84px)', lineHeight: 0.95, letterSpacing: '-0.04em', color: 'var(--tone-business)' }}>
+          {figure}
+        </span>
+        {titleBtn(20)}
+        {article.summary?.tldr && <p className="line-clamp-3" style={{ margin: 0, fontSize: 14, lineHeight: 1.55, color: 'var(--text-secondary)' }}>{article.summary.tldr}</p>}
+        <div className="flex items-center gap-2 mt-auto" style={{ fontSize: 12, color: 'var(--text-faint)' }}>
+          {names.slice(0, 2).join(', ')}{names.length > 2 ? ` +${names.length - 2}` : ''}
+          <span className="ml-auto"><CardActions article={article} onSave={onSave} /></span>
+        </div>
+      </article>
+    );
+  }
 
-  const open = () => openStory(article);
-  const iconBtn = 'p-1.5 rounded-md transition-all';
+  if (variant === 'quote' && quote) {
+    return (
+      <article className="dx-rise" style={{ ...shell, ...tinted('var(--tone-politics)') }}>
+        {kicker('The quote')}
+        <blockquote style={{ margin: 0, fontFamily: 'var(--font-serif)', fontStyle: 'italic', fontSize: 'clamp(22px, 2.4vw, 27px)', lineHeight: 1.25 }}>
+          <span aria-hidden style={{ color: 'var(--tone-politics)' }}>“</span>
+          {cleanQuote(quote)}
+          <span aria-hidden style={{ color: 'var(--tone-politics)' }}>”</span>
+        </blockquote>
+        {titleBtn(17, { color: 'var(--text-secondary)' })}
+        <div className="flex items-center gap-2 mt-auto" style={{ fontSize: 12, color: 'var(--text-faint)' }}>
+          {names.slice(0, 2).join(', ')}{names.length > 2 ? ` +${names.length - 2}` : ''}
+          <span className="ml-auto"><CardActions article={article} onSave={onSave} /></span>
+        </div>
+      </article>
+    );
+  }
 
+  if (variant === 'compact') {
+    return (
+      <article className="dx-rise" style={{ ...shell, ...tinted(tone), padding: 18, gap: 8 }}>
+        {kicker()}
+        {titleBtn(17)}
+        {article.summary?.tldr && <p className="line-clamp-2" style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: 'var(--text-secondary)' }}>{article.summary.tldr}</p>}
+      </article>
+    );
+  }
+
+  const img = safeImageUrl(article.imageUrl);
   return (
     <article
-      className="group relative border-b border-[var(--border)] transition-all duration-200 hover:bg-[var(--bg-elevated)]"
+      className="dx-rise story-grid"
       style={{
-        borderLeftWidth: '3px',
-        borderLeftColor: isHigh ? 'var(--accent-high)' : isMedium ? 'var(--accent-medium)' : categoryStyle.border,
-        backgroundColor: 'var(--bg-surface)',
+        ...shell, display: 'grid', gap: 16,
+        background: 'var(--bg-surface)', border: `1px solid ${high ? 'var(--hot-border)' : 'var(--border)'}`,
       }}
     >
-      <div className="p-4 sm:p-5">
-        <div className="flex flex-col sm:flex-row gap-4">
-          <div
-            className="relative w-full sm:w-44 shrink-0 overflow-hidden rounded-lg"
-            style={{ aspectRatio: '16 / 9', backgroundColor: categoryStyle.tint }}
-            data-testid="card-thumb"
-          >
-            {showImage ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={imageSrc}
-                alt=""
-                width={320}
-                height={180}
-                referrerPolicy="no-referrer"
-                loading="lazy"
-                decoding="async"
-                onError={() => setFailedImg(imageSrc)}
-                className="absolute inset-0 w-full h-full object-cover"
-              />
-            ) : (
-              <div
-                className="absolute inset-0 flex items-center justify-center text-3xl"
-                style={{ backgroundColor: categoryStyle.bg, border: `1px solid ${categoryStyle.border}`, borderRadius: 8 }}
-                data-testid="card-placeholder"
-                aria-hidden="true"
-              >
-                {primary?.emoji ?? '📰'}
-              </div>
-            )}
+      <div className="story-rank flex-col items-center" style={{ gap: 10, paddingTop: 2 }}>
+        {rank !== undefined && (
+          <span className="tabular-nums" style={{ fontFamily: 'var(--font-serif)', fontSize: 26, lineHeight: 1, color: 'var(--text-faint)' }}>
+            {String(rank).padStart(2, '0')}
+          </span>
+        )}
+        <ImportanceBars score={article.importanceScore} />
+      </div>
+      <div className="flex flex-col min-w-0" style={{ gap: 12 }}>
+        {kicker()}
+        <div className="flex gap-4">
+          <div className="flex flex-col min-w-0 flex-1" style={{ gap: 12 }}>
+            {titleBtn(23)}
+            <SummaryBlock article={article} mode={reading.summaryMode} />
           </div>
-
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center flex-wrap mb-2" style={{ gap: 6 }}>
-              {isHigh && (
-                <span
-                  style={{ backgroundColor: 'rgba(239, 68, 68, 0.12)', color: 'var(--accent-high)' }}
-                  className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] rounded"
-                >
-                  HIGH
-                </span>
-              )}
-              {isMedium && !isHigh && (
-                <span
-                  style={{ backgroundColor: 'rgba(245, 158, 11, 0.12)', color: 'var(--accent-medium)' }}
-                  className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] rounded"
-                >
-                  MEDIUM
-                </span>
-              )}
-              {isNew && (
-                <span
-                  style={{ backgroundColor: 'var(--accent-brand)', color: 'var(--bg-surface)' }}
-                  className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] rounded"
-                >
-                  New
-                </span>
-              )}
-              {slugs.slice(0, 2).map((slug) => {
-                const def = getCategory(slug);
-                const st = categoryColors.get(slug) ?? defaultCategory;
-                return (
-                  <span
-                    key={slug}
-                    style={{ borderColor: st.border, color: st.text, backgroundColor: st.bg }}
-                    className="px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] rounded border"
-                  >
-                    <span aria-hidden="true">{def?.emoji}</span> {def?.label ?? slug}
-                  </span>
-                );
-              })}
-              {extraCount > 0 && (
-                <span className="text-[10px] font-medium" style={{ color: 'var(--text-muted)' }}>
-                  +{extraCount}
-                </span>
-              )}
-              {sourceCount > 1 && (
-                <span
-                  className="px-2 py-0.5 text-[10px] font-medium rounded"
-                  style={{ color: 'var(--text-secondary)', backgroundColor: 'var(--bg-elevated)' }}
-                >
-                  {sourceCount} sources
-                </span>
-              )}
-            </div>
-
-            <h3
-              className="font-serif break-words min-w-0"
-              style={{
-                fontSize: 18,
-                fontWeight: 600,
-                lineHeight: 1.4,
-                color: isHigh ? 'var(--accent-high)' : 'var(--text-primary)',
-                marginBottom: 8,
-              }}
+          {img && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={img} alt="" width={132} height={99} loading="lazy" decoding="async" referrerPolicy="no-referrer"
+              onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')}
+              className="hidden sm:block shrink-0 object-cover"
+              style={{ width: 132, height: 99, borderRadius: 12, background: 'var(--bg-elevated)' }}
+            />
+          )}
+        </div>
+        <div className="flex flex-wrap items-center" style={{ gap: 10, paddingTop: 2 }}>
+          <SourceStack names={names} />
+          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{names.length === 1 ? names[0] : `${names.length} sources`}</span>
+          <div className="ml-auto flex items-center">
+            <CardActions article={article} onSave={onSave} />
+            <button
+              type="button" onClick={open} aria-haspopup="dialog"
+              className="inline-flex items-center gap-1.5"
+              style={{ height: 40, padding: '0 10px', borderRadius: 10, border: 0, background: 'transparent', color: 'var(--accent)', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}
             >
-              <button
-                type="button"
-                onClick={open}
-                aria-haspopup="dialog"
-                className="text-left cursor-pointer break-words min-w-0 max-w-full"
-                style={{ color: 'inherit', font: 'inherit' }}
-              >
-                {article.title}
-              </button>
-            </h3>
-
-            {description && (
-              <p className="line-clamp-3 mb-3" style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--text-secondary)' }}>
-                {description}
-              </p>
-            )}
-
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0" style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}>
-                <span className="font-medium truncate">{article.source}</span>
-                {time && <span className="shrink-0">{' · '}{time}</span>}
-              </div>
-
-              <div className="flex items-center gap-1 card-actions shrink-0">
-                <button
-                  type="button"
-                  onClick={handleShare}
-                  aria-label="Share article"
-                  className={`${iconBtn} text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]`}
-                >
-                  <Share2 className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSave}
-                  aria-label={isSaved ? 'Remove bookmark' : 'Bookmark article'}
-                  aria-pressed={isSaved}
-                  className={`${iconBtn} ${
-                    isSaved
-                      ? 'text-[var(--accent-brand)]'
-                      : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]'
-                  }`}
-                >
-                  <Bookmark className={`w-4 h-4 ${isSaved ? 'fill-current' : ''} ${bookmarkAnimating ? 'animate-pulse-bookmark' : ''}`} />
-                </button>
-                <button
-                  type="button"
-                  onClick={open}
-                  aria-haspopup="dialog"
-                  className="flex items-center gap-1 ml-2 pl-2 border-l border-[var(--border)] cursor-pointer"
-                  style={{ color: 'var(--text-secondary)', fontSize: 13 }}
-                >
-                  <span>Read more</span>
-                </button>
-              </div>
-            </div>
+              Full story <ArrowRight className="w-3.5 h-3.5" aria-hidden />
+            </button>
           </div>
         </div>
       </div>

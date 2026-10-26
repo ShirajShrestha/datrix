@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Playfair_Display, DM_Sans, Inter, Lora } from "next/font/google";
+import { Inter, Newsreader, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import Sidebar from "@/components/Sidebar";
 import MobileNav from "@/components/MobileNav";
@@ -16,21 +16,18 @@ const inter = Inter({
   display: "swap",
 });
 
-const lora = Lora({
+const newsreader = Newsreader({
   variable: "--font-serif",
   subsets: ["latin"],
+  style: ["normal", "italic"],
+  axes: ["opsz"],
   display: "swap",
 });
 
-const playfair = Playfair_Display({
+const mono = JetBrains_Mono({
+  variable: "--font-mono",
   subsets: ["latin"],
-  variable: "--font-display",
-  display: "swap",
-});
-
-const dmSans = DM_Sans({
-  subsets: ["latin"],
-  variable: "--font-dm-sans",
+  weight: ["500"],
   display: "swap",
 });
 
@@ -49,7 +46,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0a0a0c",
+  themeColor: "#0B0C0F",
 };
 
 export default function RootLayout({
@@ -58,13 +55,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${inter.variable} ${lora.variable} ${playfair.variable} ${dmSans.variable}`} suppressHydrationWarning>
-      <body className="antialiased bg-[var(--bg-base)] text-[var(--text-primary)]">
+    <html lang="en" className={`${inter.variable} ${newsreader.variable} ${mono.variable}`} suppressHydrationWarning>
+      <body className="antialiased">
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
           <StoryModalProvider>
           <div className="flex min-h-screen">
             <Sidebar />
-            <main className="flex-1 min-w-0 pb-20 lg:pb-0">
+            <main className="flex-1 min-w-0 pb-24 lg:pb-0">
               <MobileHeader />
               {children}
             </main>

@@ -1,194 +1,157 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import FilterBar, { Category, Importance } from '@/components/FilterBar';
-import NewsCard, { NewsArticle } from '@/components/NewsCard';
-import DigestPanel from '@/components/DigestPanel';
+import { useEffect, useMemo, useState } from 'react';
+import { format } from 'date-fns';
+import NewsCard, { type NewsArticle } from '@/components/NewsCard';
 import { NewsGridSkeleton } from '@/components/Skeletons';
-import { usePrefs, effectiveCategories } from '@/lib/prefs';
+import { CaughtUp, DesktopTopBar, LeadStory, SixtySeconds, TopicChips, greeting } from '@/components/today';
+import { DietCard, StreakCard } from '@/components/ReadingRail';
+import { SectionHeader, SummaryToggle } from '@/components/ui';
+import { usePrefs, effectiveCategories, usePreviousVisit } from '@/lib/prefs';
 import { useHydrated } from '@/lib/useHydrated';
-import { getCategory } from '@/lib/categories';
-import { useSavedArticles, toggleSavedStored } from '@/lib/savedArticles';
+import { useReadingStats } from '@/lib/useReadingStats';
+import { buildFeedLayout } from '@/lib/feedLayout';
+import { isNewSince } from '@/lib/freshness';
+import { resolveSlugs } from '@/lib/storyView';
 
-const ITEMS_PER_PAGE = 10;
-
-export default function Home() {
+export default function Today() {
   const [articles, setArticles] = useState<NewsArticle[]>([]);
-  const [filteredArticles, setFilteredArticles] = useState<NewsArticle[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<Category>('all');
-  const [selectedImportance, setSelectedImportance] = useState<Importance>('all');
-  const [currentPage, setCurrentPage] = useState(1);
-  
+  const [failed, setFailed] = useState(false);
+  const [topic, setTopic] = useState('all');
+  const [showMore, setShowMore] = useState(false);
+
   const hydrated = useHydrated();
   const [prefs] = usePrefs();
   const chosenKey = effectiveCategories(prefs).join(',');
-
-  const savedArticles = useSavedArticles<NewsArticle>();
-
-  // Reset a stale chip (e.g. category deselected in another tab) to 'all'.
-  const effectiveSelected: Category =
-    selectedCategory === 'all' || effectiveCategories(prefs).includes(selectedCategory)
-      ? selectedCategory
-      : 'all';
+  const stats = useReadingStats();
+  const previousVisit = usePreviousVisit();
 
   useEffect(() => {
     if (!hydrated) return;
     const controller = new AbortController();
     (async () => {
       setLoading(true);
+      setFailed(false);
       try {
-        const params = new URLSearchParams();
-        if (searchQuery) params.set('q', searchQuery);
-        params.set('categories', effectiveSelected === 'all' ? chosenKey : effectiveSelected);
-        if (selectedImportance !== 'all') params.set('importance', selectedImportance);
-
-        const response = await fetch(`/api/articles?${params.toString()}`, { signal: controller.signal });
-        const data = await response.json();
+        const res = await fetch(`/api/articles?limit=80&categories=${encodeURIComponent(chosenKey)}`, { signal: controller.signal });
+        const data = await res.json();
         if (controller.signal.aborted) return;
-
-        if (data.success) {
-          setArticles(data.articles);
-          setFilteredArticles(data.articles);
-          setCurrentPage(1);
-        }
+        if (data.success) setArticles(data.articles);
+        else setFailed(true);
       } catch (error) {
         if (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) return;
-        console.error('Error fetching news:', error);
+        setFailed(true);
       }
       if (!controller.signal.aborted) setLoading(false);
     })();
     return () => controller.abort();
-  }, [hydrated, chosenKey, searchQuery, effectiveSelected, selectedImportance]);
+  }, [hydrated, chosenKey]);
 
-  const handleSearch = useCallback((query: string) => {
-    setSearchQuery(query);
-  }, []);
+  const counts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const a of articles) {
+      const s = resolveSlugs(a)[0];
+      if (s) m.set(s, (m.get(s) ?? 0) + 1);
+    }
+    return [...m.entries()].map(([slug, n]) => ({ slug, n })).sort((a, b) => b.n - a.n);
+  }, [articles]);
 
-  const handleCategoryChange = useCallback((category: Category) => {
-    setSelectedCategory(category);
-  }, []);
-
-  const handleImportanceChange = useCallback((importance: Importance) => {
-    setSelectedImportance(importance);
-  }, []);
-
-  const handleSave = useCallback((article: NewsArticle) => {
-    toggleSavedStored(article);
-  }, []);
-
-  const isArticleSaved = useCallback((articleId: string) => {
-    return savedArticles.some((a: NewsArticle) => a._id === articleId);
-  }, [savedArticles]);
-
-  const paginatedArticles = filteredArticles.slice(
-    (currentPage - 1) * ITEMS_PER_PAGE,
-    currentPage * ITEMS_PER_PAGE
+  const activeTopic = topic === 'all' || counts.some((c) => c.slug === topic) ? topic : 'all';
+  const visible = useMemo(
+    () => (activeTopic === 'all' ? articles : articles.filter((a) => resolveSlugs(a).includes(activeTopic))),
+    [articles, activeTopic],
   );
-  const totalPages = Math.ceil(filteredArticles.length / ITEMS_PER_PAGE);
+  const layout = useMemo(() => buildFeedLayout(visible), [visible]);
+  const queue = visible;
+  const newCount = hydrated ? articles.filter((a) => isNewSince(a.publishedAt, previousVisit)).length : 0;
+  const remaining = Math.max(0, stats.goal - stats.today);
+  const now = stats.now ? new Date(stats.now) : null;
 
   return (
-    <div className="min-h-screen">
-      <FilterBar
-        onSearch={handleSearch}
-        onCategoryChange={handleCategoryChange}
-        onImportanceChange={handleImportanceChange}
-        selectedCategory={effectiveSelected}
-        selectedImportance={selectedImportance}
-      />
+    <div style={{ padding: '0 clamp(16px, 3vw, 40px) 64px' }}>
+      <DesktopTopBar streak={stats.streak} today={stats.today} goal={stats.goal} mode={stats.reading.summaryMode} />
 
-      <div className="flex">
-        <div className="flex-1 min-w-0" style={{ paddingLeft: 32, paddingRight: 32 }}>
-          <style jsx>{`
-            @media (max-width: 768px) {
-              .content-area {
-                padding-left: 16px !important;
-                padding-right: 16px !important;
-              }
-            }
-          `}</style>
-          <div className="content-area">
-            <div className="pt-6 pb-4">
-              <div 
-                className="flex items-center justify-between pb-4 border-b border-[var(--border)]"
-              >
-                <h1 
-                  className="font-serif"
-                  style={{
-                    fontSize: 24,
-                    fontWeight: 700,
-                    letterSpacing: '-0.02em',
-                    color: 'var(--text-primary)',
-                  }}
-                >
-                  {effectiveSelected === 'all' ? 'Top Stories' : getCategory(effectiveSelected)?.label ?? effectiveSelected}
-                </h1>
-                <div className="flex items-center gap-3">
-                  <span 
-                    style={{ height: 20, width: 1, backgroundColor: 'var(--border)' }} 
-                  />
-                  <span 
-                    className="tabular-nums"
-                    style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}
-                  >
-                    {loading ? '—' : `${filteredArticles.length} articles`}
-                  </span>
-                </div>
-              </div>
+      <div className="flex flex-wrap" style={{ gap: 40, paddingTop: 28 }}>
+        <div className="flex flex-col min-w-0" style={{ flex: '999 1 560px', gap: 24 }}>
+          <div className="flex flex-wrap items-end" style={{ gap: 12 }}>
+            <div className="flex flex-col" style={{ gap: 6 }}>
+              <span className="kicker" style={{ fontSize: 12 }}>{now ? format(now, 'EEEE, MMMM d') : ' '}</span>
+              <h1 style={{ margin: 0, fontWeight: 500, fontSize: 'clamp(32px, 4vw, 44px)', lineHeight: 1.1, letterSpacing: '-0.02em' }}>
+                {now ? greeting(now.getHours()) : 'Today'}
+              </h1>
             </div>
-
-            {loading ? (
-              <NewsGridSkeleton count={6} />
-            ) : paginatedArticles.length > 0 ? (
-              <>
-                <div className="flex flex-col">
-                  {paginatedArticles.map((article) => (
-                    <NewsCard 
-                      key={article._id} 
-                      article={{ ...article, isSaved: isArticleSaved(article._id) }} 
-                      onSave={handleSave}
-                    />
-                  ))}
-                </div>
-                
-                {totalPages > 1 && (
-                  <div className="flex items-center justify-center gap-2 py-8">
-                    <button
-                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                      disabled={currentPage === 1}
-                      className="px-4 py-2 rounded-md text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[var(--bg-elevated)] transition-colors"
-                      style={{ color: 'var(--text-secondary)', backgroundColor: 'var(--bg-surface)' }}
-                    >
-                      Previous
-                    </button>
-                    <span style={{ color: 'var(--text-muted)', fontSize: 14 }}>
-                      Page {currentPage} of {totalPages}
-                    </span>
-                    <button
-                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                      disabled={currentPage === totalPages}
-                      className="px-4 py-2 rounded-md text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[var(--bg-elevated)] transition-colors"
-                      style={{ color: 'var(--text-secondary)', backgroundColor: 'var(--bg-surface)' }}
-                    >
-                      Next
-                    </button>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="text-center py-12">
-                <p style={{ color: 'var(--text-muted)' }}>No articles found</p>
-                <p style={{ fontSize: 14, color: 'var(--text-muted)', opacity: 0.6, marginTop: 8 }}>Try adjusting your filters</p>
-              </div>
-            )}
+            <span className="ml-auto" style={{ fontSize: 14, color: 'var(--text-muted)' }}>
+              {!hydrated ? '' : stats.goalMet ? 'Daily goal reached' : `${remaining} more ${remaining === 1 ? 'story' : 'stories'} to hit today’s goal`}
+              {newCount > 0 && <span style={{ marginLeft: 10, color: 'var(--accent)' }}>· {newCount} new since your last visit</span>}
+            </span>
           </div>
+
+          <div className="lg:hidden">
+            <SummaryToggle mode={stats.reading.summaryMode} full />
+          </div>
+
+          {loading ? (
+            <NewsGridSkeleton count={4} />
+          ) : failed ? (
+            <div className="text-center" style={{ padding: '48px 0', color: 'var(--text-muted)' }}>
+              <p style={{ margin: 0 }}>Couldn’t load today’s stories.</p>
+              <p style={{ margin: '6px 0 0', fontSize: 13 }}>Check your connection and refresh.</p>
+            </div>
+          ) : articles.length === 0 ? (
+            <div className="text-center" style={{ padding: '48px 0', color: 'var(--text-muted)' }}>No stories yet. The next refresh will bring some in.</div>
+          ) : (
+            <>
+              {layout.lead && <LeadStory article={layout.lead} queue={queue} reading={stats.reading} />}
+              {activeTopic === 'all' && <SixtySeconds articles={articles} />}
+              <TopicChips counts={counts} selected={activeTopic} onSelect={(s) => { setTopic(s); setShowMore(false); }} />
+
+              {layout.keepUp.length > 0 && (
+                <>
+                  <SectionHeader title="Keep up" meta={`${layout.keepUp.length} stories`} />
+                  <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', gridAutoFlow: 'row dense', gap: 14 }}>
+                    {layout.keepUp.map((it, i) => (
+                      <div key={it.article._id} style={{ gridColumn: it.wide ? '1 / -1' : undefined }}>
+                        <NewsCard article={it.article} variant={it.variant} figure={it.figure} quote={it.quote} rank={i + 2} queue={queue} />
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {hydrated && <CaughtUp today={stats.today} goal={stats.goal} streak={stats.streak} remaining={remaining} />}
+
+              {layout.quickHits.length > 0 && (
+                <>
+                  <SectionHeader title="Quick hits" meta="One line each" />
+                  <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 220px), 1fr))', gap: 12 }}>
+                    {layout.quickHits.map((a) => <NewsCard key={a._id} article={a} variant="compact" queue={queue} />)}
+                  </div>
+                </>
+              )}
+
+              {layout.more.length > 0 && (
+                showMore ? (
+                  <div className="flex flex-col" style={{ gap: 12 }}>
+                    <SectionHeader title="Everything else" meta={`${layout.more.length} stories`} />
+                    {layout.more.map((a) => <NewsCard key={a._id} article={a} queue={queue} />)}
+                  </div>
+                ) : (
+                  <button
+                    type="button" onClick={() => setShowMore(true)}
+                    style={{ height: 48, borderRadius: 14, border: '1px dashed var(--border-highlight)', background: 'transparent', color: 'var(--text-muted)', fontSize: 14, cursor: 'pointer' }}
+                  >
+                    Show {layout.more.length} more stories
+                  </button>
+                )
+              )}
+            </>
+          )}
         </div>
 
-        <aside className="w-[320px] flex-shrink-0 hidden lg:block px-6 pt-6">
-          <div className="sticky top-24">
-            <DigestPanel articles={articles} />
-          </div>
+        <aside className="flex flex-col" style={{ flex: '1 1 280px', maxWidth: 360, gap: 18 }} aria-label="Your reading">
+          {hydrated && <StreakCard stats={stats} />}
+          {hydrated && <DietCard stats={stats} />}
         </aside>
       </div>
     </div>

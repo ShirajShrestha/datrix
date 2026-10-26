@@ -2,55 +2,32 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, Search, FileText, Bookmark } from 'lucide-react';
-
-const navItems = [
-  { href: '/', label: 'Feed', icon: Home },
-  { href: '/search', label: 'Search', icon: Search },
-  { href: '/digest', label: 'Digest', icon: FileText },
-  { href: '/saved', label: 'Saved', icon: Bookmark },
-];
+import { NAV } from '@/components/Sidebar';
 
 export default function MobileNav() {
   const pathname = usePathname();
-
   return (
-    <nav 
-      className="fixed bottom-0 left-0 right-0 z-50 lg:hidden"
-      style={{ 
-        background: 'var(--bg-surface)',
-        borderTop: '1px solid var(--border)',
-        height: 56,
-      }}
+    <nav
+      aria-label="Main"
+      className="fixed bottom-0 left-0 right-0 z-50 lg:hidden grid grid-cols-4"
+      style={{ background: 'var(--bg-sidebar)', borderTop: '1px solid var(--border)', padding: '6px 8px calc(8px + env(safe-area-inset-bottom))' }}
     >
-      <div className="flex items-center justify-around h-full px-4">
-        {navItems.map((item) => {
-          const isActive = pathname === item.href;
-          const Icon = item.icon;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="flex flex-col items-center justify-center gap-1 px-3 py-2 rounded-lg transition-all"
-              style={{ height: '100%' }}
-            >
-              <Icon 
-                className="w-5 h-5" 
-                style={{ color: isActive ? 'var(--accent-brand)' : 'var(--text-muted)' }}
-              />
-              <span 
-                className="text-[10px]"
-                style={{ 
-                  fontFamily: 'var(--font-sans)',
-                  color: isActive ? 'var(--accent-brand)' : 'var(--text-muted)',
-                }}
-              >
-                {item.label}
-              </span>
-            </Link>
-          );
-        })}
-      </div>
+      {NAV.map((n) => {
+        const active = pathname === n.href;
+        const Icon = n.icon;
+        return (
+          <Link
+            key={n.href}
+            href={n.href}
+            aria-current={active ? 'page' : undefined}
+            className="flex flex-col items-center justify-center gap-1"
+            style={{ height: 52, fontSize: 11, fontWeight: active ? 500 : 400, color: active ? 'var(--accent)' : 'var(--text-muted)', textDecoration: 'none' }}
+          >
+            <Icon className="w-[22px] h-[22px]" aria-hidden />
+            {n.short}
+          </Link>
+        );
+      })}
     </nav>
   );
 }

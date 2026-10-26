@@ -2,168 +2,96 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import {
-  Home,
-  Search,
-  FileText,
-  Bookmark,
-  Zap,
-  Sparkles,
-  Settings,
-} from 'lucide-react';
+import { Sun, Layers, Search, Bookmark, SlidersHorizontal, Zap } from 'lucide-react';
 import { usePrefs, effectiveCategories } from '@/lib/prefs';
 import { orderedCategories } from '@/lib/categoryPicker';
 import { useHydrated } from '@/lib/useHydrated';
+import { useSavedArticles } from '@/lib/savedArticles';
+import { TopicDot } from '@/components/ui';
 
-const navItems = [
-  { href: '/', label: 'Feed', icon: Home },
-  { href: '/search', label: 'Search', icon: Search },
-  { href: '/digest', label: 'Daily Digest', icon: FileText },
-  { href: '/saved', label: 'Saved', icon: Bookmark },
-  { href: '/settings', label: 'Settings', icon: Settings },
+export const NAV = [
+  { href: '/', label: 'Today', short: 'Today', icon: Sun },
+  { href: '/digest', label: 'Daily digest', short: 'Digest', icon: Layers },
+  { href: '/search', label: 'Search', short: 'Search', icon: Search },
+  { href: '/saved', label: 'Saved', short: 'Saved', icon: Bookmark },
 ];
+
+export function Logo() {
+  return (
+    <Link href="/" className="flex items-center gap-2.5" style={{ color: 'var(--text-primary)', textDecoration: 'none' }}>
+      <span style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Zap className="w-4 h-4" fill="var(--accent-ink)" stroke="var(--accent-ink)" aria-hidden />
+      </span>
+      <span style={{ fontFamily: 'var(--font-serif)', fontSize: 22, fontWeight: 600, letterSpacing: '-0.01em' }}>Datrix</span>
+    </Link>
+  );
+}
 
 export default function Sidebar() {
   const pathname = usePathname();
   const hydrated = useHydrated();
   const [prefs] = usePrefs();
-  const categories = hydrated
-    ? orderedCategories(effectiveCategories(prefs)).map((c) => ({
-        href: `/category/${c.slug}`,
-        label: c.label,
-        emoji: c.emoji,
-        color: c.color,
-      }))
-    : [];
+  const saved = useSavedArticles();
+  const topics = hydrated ? orderedCategories(effectiveCategories(prefs)) : [];
+
+  const item = (active: boolean): React.CSSProperties => ({
+    display: 'flex', alignItems: 'center', gap: 12, height: 44, padding: '0 12px', borderRadius: 10, textDecoration: 'none',
+    background: active ? 'var(--bg-elevated)' : 'transparent',
+    color: active ? 'var(--text-primary)' : 'var(--text-muted)', fontSize: 14, fontWeight: active ? 500 : 400,
+  });
 
   return (
-    <aside 
-      className="w-[240px] h-screen sticky top-0 border-r border-[var(--border)] hidden lg:block z-50 flex-shrink-0"
-      style={{ 
-        backgroundColor: 'var(--bg-base)',
-        borderRight: '1px solid var(--border)',
-      }}
+    <aside
+      className="hidden lg:flex flex-col sticky top-0 h-screen shrink-0"
+      style={{ width: 248, padding: '24px 16px', gap: 28, borderRight: '1px solid var(--border)', background: 'var(--bg-sidebar)' }}
+      aria-label="Main"
     >
-      <div className="p-5 h-full flex flex-col">
-        <div className="flex items-center gap-2.5 mb-8">
-          <Zap className="w-5 h-5" style={{ color: 'var(--accent-brand)' }} strokeWidth={2.5} />
-          <span 
-            className="text-xl font-semibold font-serif tracking-tight"
-            style={{ color: 'var(--text-primary)' }}
-          >
-            Datrix
-          </span>
-        </div>
+      <div style={{ padding: '0 8px' }}>
+        <Logo />
+      </div>
+      <nav className="flex flex-col" style={{ gap: 2 }}>
+        {NAV.map((n) => {
+          const active = pathname === n.href;
+          const Icon = n.icon;
+          return (
+            <Link key={n.href} href={n.href} style={item(active)} aria-current={active ? 'page' : undefined}>
+              <Icon className="w-[18px] h-[18px]" style={{ color: active ? 'var(--accent)' : undefined }} aria-hidden />
+              {n.label}
+              {n.href === '/saved' && hydrated && saved.length > 0 && (
+                <span className="ml-auto tabular-nums" style={{ fontSize: 12, color: 'var(--text-faint)' }}>{saved.length}</span>
+              )}
+            </Link>
+          );
+        })}
+      </nav>
 
-        <nav className="space-y-1 mb-6">
-          {navItems.map((item) => {
-            const isActive = pathname === item.href;
-            const Icon = item.icon;
+      <div className="flex flex-col min-h-0" style={{ gap: 2 }}>
+        <div className="flex items-center justify-between" style={{ padding: '0 12px 8px' }}>
+          <span className="kicker">Topics</span>
+          <Link href="/settings" style={{ fontSize: 12, color: 'var(--accent)' }}>Edit</Link>
+        </div>
+        <div className="flex flex-col overflow-y-auto no-scrollbar" style={{ gap: 2 }}>
+          {topics.map((c) => {
+            const href = `/category/${c.slug}`;
+            const active = pathname === href;
             return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="relative flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 group"
-                style={{
-                  background: isActive ? 'var(--bg-elevated)' : 'transparent',
-                  color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
-                }}
-              >
-                {isActive && (
-                  <span 
-                    className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r" 
-                    style={{ backgroundColor: 'var(--accent-brand)' }}
-                  />
-                )}
-                <Icon 
-                  className="w-4 h-4" 
-                  style={{ color: isActive ? 'var(--accent-brand)' : 'var(--text-secondary)' }}
-                />
-                <span 
-                  className="text-sm"
-                  style={{ 
-                    fontFamily: 'var(--font-sans)',
-                    color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
-                    fontWeight: isActive ? 500 : 400,
-                  }}
-                >
-                  {item.label}
-                </span>
+              <Link key={c.slug} href={href} style={{ ...item(active), height: 36, color: active ? 'var(--text-primary)' : 'var(--text-secondary)' }} aria-current={active ? 'page' : undefined}>
+                <TopicDot slug={c.slug} />
+                {c.label}
               </Link>
             );
           })}
-        </nav>
-
-        <div className="border-t border-[var(--border)] pt-5 mb-6 flex-1 min-h-0 overflow-y-auto">
-          <h3 
-            className="px-3 text-[10px] font-medium mb-3"
-            style={{ 
-              fontFamily: 'var(--font-sans)',
-              color: 'var(--text-muted)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.15em',
-            }}
-          >
-            Categories
-          </h3>
-          <nav className="space-y-1">
-            {categories.map((cat) => {
-              const isActive = pathname === cat.href;
-              return (
-                <Link
-                  key={cat.href}
-                  href={cat.href}
-                  className="relative flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 group"
-                  style={{
-                    background: isActive ? 'var(--bg-elevated)' : 'transparent',
-                    color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
-                  }}
-                >
-                  {isActive && (
-                    <span 
-                      className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-r" 
-                      style={{ backgroundColor: 'var(--accent-brand)' }}
-                    />
-                  )}
-                  <span aria-hidden className="shrink-0" style={{ width: 18, textAlign: 'center', fontSize: 14 }}>
-                    {cat.emoji}
-                  </span>
-                  <span 
-                    className="text-sm"
-                    style={{ 
-                      fontFamily: 'var(--font-sans)',
-                      color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
-                      fontWeight: isActive ? 500 : 400,
-                    }}
-                  >
-                    {cat.label}
-                  </span>
-                </Link>
-              );
-            })}
-          </nav>
         </div>
+      </div>
 
-        <div className="mt-auto pt-2">
-          <div 
-            className="p-3 rounded-xl border"
-            style={{
-              background: 'var(--bg-elevated)',
-              borderColor: 'var(--border)',
-            }}
-          >
-            <p 
-              className="text-[11px] leading-relaxed flex items-center gap-2"
-              style={{ 
-                fontFamily: 'var(--font-sans)',
-                color: 'var(--text-muted)',
-              }}
-            >
-              <Sparkles className="w-3 h-3" style={{ color: 'var(--accent-brand)' }} />
-              AI-powered intelligence for what matters.
-            </p>
-          </div>
-        </div>
+      <div className="mt-auto flex flex-col" style={{ gap: 6, padding: 14, border: '1px solid var(--border)', borderRadius: 12 }}>
+        <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>Daily digest</span>
+        <span style={{ fontSize: 14, fontWeight: 500 }}>
+          {hydrated && prefs.notifyEnabled ? `Every day · ${prefs.notifyTime}` : 'Notifications off'}
+        </span>
+        <Link href="/settings" className="flex items-center gap-2" style={{ ...item(pathname === '/settings'), height: 36, padding: 0, background: 'transparent', fontSize: 13 }}>
+          <SlidersHorizontal className="w-4 h-4" aria-hidden /> Settings
+        </Link>
       </div>
     </aside>
   );
