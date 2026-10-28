@@ -55,7 +55,7 @@ Copy `.env.example` to `.env.local`. Never commit real values.
 | `MEDIASTACK_API_KEY` | Optional | MediaStack source. Skipped if unset. |
 | `MEDIASTACK_MAX_CALLS_PER_RUN` | Optional | MediaStack calls per ingest run; default `3`, clamped 0-7, `0` disables the source. Categories rotate daily. |
 | `GROQ_API_KEY` | Optional | First summary provider. |
-| `GROQ_MODEL` | Optional | Groq model; default `llama-3.1-8b-instant`. |
+| `GROQ_MODEL` | Optional | Groq model; default `qwen/qwen3.8-27b`. |
 | `GEMINI_API_KEY` | Optional | Second summary provider. |
 | `GEMINI_MODEL` | Optional | Gemini model; default `gemini-3.5-flash-lite`. |
 | `VAPID_PUBLIC_KEY` | Required for push | VAPID public key (server). |

@@ -1,7 +1,7 @@
 import { MissingKeyError, ProviderHttpError, DEFAULT_TIMEOUT_MS, SYSTEM_PROMPT, buildUserPrompt, parseSummaries, type SummaryProvider } from './parse';
 
 export const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-export const GROQ_DEFAULT_MODEL = 'llama-3.1-8b-instant';
+export const GROQ_DEFAULT_MODEL = 'qwen/qwen3.8-27b';
 
 export const groqProvider: SummaryProvider = async (batch, opts) => {
   const key = process.env.GROQ_API_KEY;

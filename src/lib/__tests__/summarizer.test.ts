@@ -3,6 +3,7 @@ import {
   parseSummaries, extractiveSummary, summarizeBatch, MissingKeyError, ProviderHttpError,
   type SummaryInput, type SummaryProvider,
 } from '../services/summarizer';
+import { SYSTEM_PROMPT, buildUserPrompt, BODY_PROMPT_CHARS } from '../services/summarizer/parse';
 import { groqProvider } from '../services/summarizer/groq';
 import { geminiProvider } from '../services/summarizer/gemini';
 
@@ -221,5 +222,81 @@ describe('summarizeBatch failures', () => {
     expect((await summarizeBatch(items, [M])).failures).toEqual([]);
     const OK: SummaryProvider = async (b) => new Map(b.map((x) => [x.url, sum('t')]));
     expect((await summarizeBatch(items, [OK])).failures).toEqual([]);
+  });
+});
+
+describe('body-aware prompt', () => {
+  it('embeds first 2000 chars of body, not description', () => {
+    const body = 'B'.repeat(1999) + 'XY' + 'Z'.repeat(3000);
+    const p = buildUserPrompt([{ url: 'u', title: 't', description: 'DESCRIPTION-TEXT', body }]);
+    const text = JSON.parse(p.split('\n')[1]).items[0].text as string;
+    expect(BODY_PROMPT_CHARS).toBe(2000);
+    expect(text).toBe(body.slice(0, 2000));
+    expect(p).not.toContain('DESCRIPTION-TEXT');
+  });
+  it('falls back to description without body', () => {
+    const p = buildUserPrompt([{ url: 'u', title: 't', description: 'D'.repeat(900) }]);
+    expect(JSON.parse(p.split('\n')[1]).items[0].text).toBe('D'.repeat(600));
+  });
+  it('system prompt says title and text, same JSON shape', () => {
+    expect(SYSTEM_PROMPT).toContain('title and text');
+    expect(SYSTEM_PROMPT).toContain('{"items":[{"id":<integer index>,"tldr":string,"bullets":string[],"whyItMatters":string}]}');
+  });
+});
+
+describe('summarizeBatch grouping and 429 retry', () => {
+  const withBody = (n: number): SummaryInput[] => mkItems(n).map((i) => ({ ...i, body: 'article body' }));
+  const ok: SummaryProvider = async (b) => new Map(b.map((x) => [x.url, sum('ok')]));
+  it('groups of 4 with bodies', async () => {
+    const A = vi.fn<SummaryProvider>(ok);
+    await summarizeBatch(withBody(9), [A]);
+    expect(A).toHaveBeenCalledTimes(3);
+  });
+  it('groups of 8 without bodies', async () => {
+    const A = vi.fn<SummaryProvider>(ok);
+    await summarizeBatch(mkItems(9), [A]);
+    expect(A).toHaveBeenCalledTimes(2);
+  });
+  it('retries once after 429 and succeeds', async () => {
+    let n = 0;
+    const A: SummaryProvider = async (b) => { if (n++ === 0) throw new ProviderHttpError('groq', 429); return ok(b); };
+    const sleep = vi.fn(async () => {});
+    const r = await summarizeBatch(mkItems(3), [A], { retry429Ms: 20_000, sleep, concurrency: 1 });
+    expect(sleep).toHaveBeenCalledWith(20000);
+    expect(r.summaries.get(batch3[0].url)!.provider).toBe('groq');
+    expect(r.failures).not.toContain('summarizer:groq:429');
+  });
+  it('persistent 429 falls to extractive, one failure, provider skipped later', async () => {
+    const A = vi.fn<SummaryProvider>(async () => { throw new ProviderHttpError('groq', 429); });
+    const sleep = vi.fn(async () => {});
+    const r = await summarizeBatch(mkItems(10), [A], { retry429Ms: 20_000, sleep, concurrency: 1 });
+    expect(A).toHaveBeenCalledTimes(2);
+    expect(r.failures).toEqual(['summarizer:groq:429']);
+    expect(r.summaries.get('https://x.test/9')!.provider).toBe('extractive');
+  });
+  it('default options: 429 kills provider immediately', async () => {
+    const A = vi.fn<SummaryProvider>(async () => { throw new ProviderHttpError('groq', 429); });
+    await summarizeBatch(mkItems(10), [A], { concurrency: 1 });
+    expect(A).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('groq default model', () => {
+  const env = { ...process.env };
+  afterEach(() => { process.env = { ...env }; vi.unstubAllGlobals(); });
+  const content = JSON.stringify({ items: [{ id: 0, tldr: 'T', bullets: ['b'] }] });
+  const run = async () => {
+    const f = vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 }));
+    vi.stubGlobal('fetch', f);
+    await groqProvider(batch3);
+    return JSON.parse((f.mock.calls[0] as unknown as [string, RequestInit])[1].body as string).model;
+  };
+  it('uses qwen/qwen3.8-27b when GROQ_MODEL unset', async () => {
+    process.env.GROQ_API_KEY = 'k'; delete process.env.GROQ_MODEL;
+    expect(await run()).toBe('qwen/qwen3.8-27b');
+  });
+  it('GROQ_MODEL overrides', async () => {
+    process.env.GROQ_API_KEY = 'k'; process.env.GROQ_MODEL = 'custom/model';
+    expect(await run()).toBe('custom/model');
   });
 });
