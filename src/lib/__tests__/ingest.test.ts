@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('@/lib/db', () => ({ connectToDatabase: vi.fn(async () => undefined) }));
 vi.mock('@/lib/sources', () => ({ fetchAllSources: vi.fn(async () => ({ articles: [], failures: [] })) }));
 
-import { selectPool, computeExpireAt } from '../services/ingest';
+import { selectPool, computeExpireAt, attachBodies } from '../services/ingest';
 import { CATEGORIES, type CategorySlug } from '../categories';
 import type { ScoredArticle } from '../services/scoring';
 
@@ -291,5 +291,39 @@ describe('ingest options', () => {
     const report = await runIngest({ budgetMs: 1, poolPerCategory: 5 });
     expect(report.fetched).toBe(0);
     expect(vi.mocked(fetchAllSources)).toHaveBeenCalledWith({ deadlineMs: 0 });
+  });
+});
+
+describe('attachBodies', () => {
+  it('sets body only for urls in the map and preserves order', () => {
+    const items = [mk('a', 0.9, ['ai']), mk('b', 0.8, ['ai']), mk('c', 0.7, ['ai'])];
+    items[0].description = 'da';
+    const out = attachBodies(items, new Map([['c', 'body c'], ['a', 'body a']]));
+    expect(out.map((o) => o.url)).toEqual(['a', 'b', 'c']);
+    expect(out[0]).toEqual({ url: 'a', title: 't a', description: 'da', body: 'body a' });
+    expect('body' in out[1]).toBe(false);
+    expect(out[2].body).toBe('body c');
+  });
+});
+
+describe('selectNeedSummary with extractive summaries', () => {
+  it('still needs an LLM summary when the stored one is extractive', () => {
+    const valid = [mk('a', 0.9, ['ai']), mk('b', 0.8, ['ai'])];
+    const { needSummary, llmSummaryUrls } = selectNeedSummary(valid, [
+      { url: 'a', summary: { tldr: 'x', provider: 'extractive' } },
+      { url: 'b', summary: { tldr: 'y', provider: 'groq' } },
+    ]);
+    expect(needSummary.map((a) => a.url)).toEqual(['a']);
+    expect([...llmSummaryUrls]).toEqual(['b']);
+  });
+});
+
+describe('buildOps never persists body', () => {
+  it('emits no body key anywhere, even when articles carry bodies', () => {
+    const a = { ...mk('a', 0.9, ['ai']), body: 'SECRET BODY TEXT' };
+    const ops = buildOps([a], new Map([['a', { tldr: 't', bullets: [], provider: 'groq' as const }]]), new Set(), new Date('2026-10-28T00:00:00Z'));
+    const json = JSON.stringify(ops);
+    expect(json).not.toContain('SECRET BODY TEXT');
+    expect(json).not.toMatch(/"body"/);
   });
 });

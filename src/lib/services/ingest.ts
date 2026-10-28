@@ -3,7 +3,8 @@ import { fetchAllSources } from '@/lib/sources';
 import { scoreArticles, deduplicateArticles, unionImages, MAX_SOURCES, type ScoredArticle } from '@/lib/services/scoring';
 import { resolveImages } from '@/lib/services/images';
 import { connectToDatabase } from '@/lib/db';
-import { summarizeBatch } from '@/lib/services/summarizer';
+import { summarizeBatch, type SummaryInput } from '@/lib/services/summarizer';
+import { resolveBodies } from '@/lib/services/body';
 import { Article } from '@/lib/models/Article';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -132,6 +133,8 @@ export interface IngestReport {
   llmSummarized: number;
   failures: string[];
   llmCalls: number;
+  /** Articles sent to the summarizer with an article body. */
+  bodies: number;
 }
 
 export interface StoredSummary {
@@ -194,13 +197,37 @@ export function selectPool(articles: ScoredArticle[], perCategory: number): Scor
   return out;
 }
 
+/** Builds summarizer inputs in order; `body` is set only for urls present in the map. */
+export function attachBodies(needSummary: ScoredArticle[], bodies: Map<string, string>): SummaryInput[] {
+  return needSummary.map((a) => {
+    const input: SummaryInput = { url: a.url, title: a.title, description: a.description };
+    const body = bodies.get(a.url);
+    if (body) input.body = body;
+    return input;
+  });
+}
+
+const BODY_DEADLINE_MARGIN_MS = 30_000;
+
 async function summarizeNew(
   items: ScoredArticle[],
   deadlineAt: number,
   now: () => number,
-): Promise<{ summaries: Map<string, StoredSummary>; llmCalls: number; failures: string[] }> {
-  const inputs = items.map((a) => ({ url: a.url, title: a.title, description: a.description }));
-  return summarizeBatch(inputs, undefined, { deadlineAt, now });
+  bodyMax: number,
+  retry429Ms: number,
+): Promise<{ summaries: Map<string, StoredSummary>; llmCalls: number; failures: string[]; bodies: number }> {
+  let bodies = new Map<string, string>();
+  if (items.length > 0) {
+    // The cap only limits NEW page fetches; feed-provided bodies are kept for every item.
+    const fetched = bodyMax > 0
+      ? await resolveBodies(items.slice(0, bodyMax), { max: bodyMax, deadlineAt: deadlineAt - BODY_DEADLINE_MARGIN_MS, now })
+      : new Map<string, string>();
+    bodies = fetched;
+    for (const a of items) if (a.body && !bodies.has(a.url)) bodies.set(a.url, a.body);
+  }
+  const inputs = attachBodies(items, bodies);
+  const r = await summarizeBatch(inputs, undefined, { deadlineAt, now, retry429Ms });
+  return { ...r, bodies: inputs.filter((i) => i.body).length };
 }
 
 function hostOf(url: string): string {
@@ -221,7 +248,7 @@ function cleanCategories(cats: string[]): CategorySlug[] {
 }
 
 export async function runIngest(
-  opts: { clock?: () => number; budgetMs?: number; poolPerCategory?: number } = {},
+  opts: { clock?: () => number; budgetMs?: number; poolPerCategory?: number; bodyMax?: number; retry429Ms?: number } = {},
 ): Promise<IngestReport> {
   const budgetMs = opts.budgetMs ?? INGEST_BUDGET_MS;
   const poolPerCategory = opts.poolPerCategory ?? POOL_PER_CATEGORY;
@@ -233,7 +260,7 @@ export async function runIngest(
   const { articles: raw, failures: sourceFailures } = await fetchAllSources({ deadlineMs: planFetchDeadline(0, budgetMs) });
   const failures = [...sourceFailures];
   const report: IngestReport = {
-    fetched: raw.length, kept: 0, created: 0, updated: 0, summarized: 0, llmSummarized: 0, failures, llmCalls: 0,
+    fetched: raw.length, kept: 0, created: 0, updated: 0, summarized: 0, llmSummarized: 0, failures, llmCalls: 0, bodies: 0,
   };
   if (raw.length === 0) return report;
 
@@ -299,8 +326,11 @@ export async function runIngest(
     { url: 1, summary: 1 },
   ).lean();
   const { needSummary, llmSummaryUrls } = selectNeedSummary(valid, existing);
-  const { summaries, llmCalls, failures: summarizerFailures } = await summarizeNew(needSummary, startedAt + budgetMs - SUMMARY_WRITE_RESERVE_MS, clock);
+  const { summaries, llmCalls, failures: summarizerFailures, bodies } = await summarizeNew(
+    needSummary, startedAt + budgetMs - SUMMARY_WRITE_RESERVE_MS, clock, opts.bodyMax ?? 0, opts.retry429Ms ?? 0,
+  );
   report.llmCalls = llmCalls;
+  report.bodies = bodies;
   for (const f of summarizerFailures) if (!failures.includes(f)) failures.push(f);
   report.summarized = summaries.size;
   report.llmSummarized = [...summaries.values()].filter((x) => x.provider === 'groq' || x.provider === 'gemini').length;
