@@ -352,3 +352,30 @@ describe('summarizeBatch 429 retry', () => {
     expect(r.llmCalls).toBe(2);
   });
 });
+
+describe('minGapMs pacing', () => {
+  const okP: SummaryProvider = async (b) => new Map(b.map((x) => [x.url, sum('t')]));
+  it('sleeps the remaining gap before calls 2 and 3, never before call 1', async () => {
+    let t = 1000;
+    const sleeps: number[] = [];
+    const sleep = async (ms: number) => { sleeps.push(ms); t += ms; };
+    const P = vi.fn<SummaryProvider>(async (b) => { t += 2000; return okP(b, { timeoutMs: 1 }); });
+    await summarizeBatch(mkItems(24), [P], { minGapMs: 18_000, concurrency: 1, now: () => t, sleep });
+    expect(P).toHaveBeenCalledTimes(3);
+    expect(sleeps).toEqual([16_000, 16_000]);
+  });
+  it('default minGapMs never sleeps', async () => {
+    const sleep = vi.fn(async () => {});
+    await summarizeBatch(mkItems(24), [okP], { concurrency: 1, sleep });
+    expect(sleep).not.toHaveBeenCalled();
+  });
+  it('does not wait past the deadline', async () => {
+    let t = 0;
+    const sleep = vi.fn(async (ms: number) => { t += ms; });
+    const P = vi.fn<SummaryProvider>(okP);
+    const r = await summarizeBatch(mkItems(16), [P], { minGapMs: 18_000, concurrency: 1, now: () => t, sleep, deadlineAt: 10_000 });
+    expect(P).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+    expect(r.summaries.get('https://x.test/15')!.provider).toBe('extractive');
+  });
+});

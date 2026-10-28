@@ -19,6 +19,8 @@ export interface SummarizeOpts {
   /** On a 429, sleep this long then retry that provider once for the group. Default 0 = mark dead immediately. */
   retry429Ms?: number;
   sleep?: (ms: number) => Promise<void>;
+  /** Minimum ms between the starts of two calls to the same provider (free-tier token pacing). Default 0 = none. */
+  minGapMs?: number;
 }
 
 /** Provider label stored on summaries: explicit property, else groq/gemini by chain position. */
@@ -44,6 +46,8 @@ export async function summarizeBatch(
   const failures = new Set<string>(); // coarse `summarizer:<provider>:<token>` only; never messages/URLs/keys
 
   const retry429Ms = opts.retry429Ms ?? 0;
+  const minGapMs = Math.max(0, opts.minGapMs ?? 0);
+  const lastStart = new Map<number, number>(); // provider index -> reserved start time of its latest call
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const size = items.some((i) => i.body) ? GROUP_SIZE_WITH_BODY : GROUP_SIZE;
   const groups: SummaryInput[][] = [];
@@ -57,11 +61,22 @@ export async function summarizeBatch(
       const missing = batch.filter((b) => !got.has(b.url));
       if (missing.length === 0) break;
       if (dead.has(pi)) continue;
-      const left = opts.deadlineAt === undefined ? Infinity : opts.deadlineAt - now();
-      if (left <= 0) break;
-      const timeoutMs = Math.max(1, Math.min(DEFAULT_TIMEOUT_MS, left));
+      if ((opts.deadlineAt === undefined ? Infinity : opts.deadlineAt - now()) <= 0) break;
       const label = labelOf(providers[pi], pi);
-      const attempt = async (timeoutMs: number): Promise<void> => {
+      /** Returns false (without calling) when pacing would run past the deadline or the provider died meanwhile. */
+      const attempt = async (): Promise<boolean> => {
+        if (minGapMs > 0) {
+          const t = now();
+          const last = lastStart.get(pi);
+          const startAt = last === undefined ? t : Math.max(t, last + minGapMs);
+          if (opts.deadlineAt !== undefined && startAt >= opts.deadlineAt) return false;
+          lastStart.set(pi, startAt); // reserve the slot synchronously so concurrent groups queue behind it
+          if (startAt > t) await sleep(startAt - t);
+          if (dead.has(pi)) return false;
+        }
+        const left = opts.deadlineAt === undefined ? Infinity : opts.deadlineAt - now();
+        if (left <= 0) return false;
+        const timeoutMs = Math.max(1, Math.min(DEFAULT_TIMEOUT_MS, left));
         llmCalls++;
         const res = await providers[pi](missing, { timeoutMs });
         const wanted = new Set(missing.map((m) => m.url));
@@ -70,11 +85,13 @@ export async function summarizeBatch(
           if (wanted.has(url) && s && typeof s.tldr === 'string' && s.tldr) { got.set(url, { ...s, provider: label }); usable++; }
         }
         if (usable === 0) failures.add(`summarizer:${label}:parse`);
+        return true;
       };
+      let stop = false;
       let outOfTime = false;
       try {
         try {
-          await attempt(timeoutMs);
+          if (!(await attempt())) stop = true;
         } catch (e) {
           if (!(e instanceof ProviderHttpError && e.status === 429 && retry429Ms > 0)) throw e;
           await sleep(retry429Ms);
@@ -85,7 +102,10 @@ export async function summarizeBatch(
             outOfTime = true;
             throw e;
           }
-          await attempt(Math.max(1, Math.min(DEFAULT_TIMEOUT_MS, leftAfter)));
+          if (!(await attempt())) {
+            outOfTime = true;
+            throw e;
+          }
         }
       } catch (e) {
         if (e instanceof MissingKeyError) {
@@ -94,12 +114,12 @@ export async function summarizeBatch(
         } else if (e instanceof ProviderHttpError) {
           failures.add(`summarizer:${label}:${Number.isInteger(e.status) ? e.status : 'error'}`);
           if (e.status === 429) dead.add(pi);
-          if (outOfTime) break;
         } else {
           const name = (e as { name?: unknown } | null)?.name;
           failures.add(`summarizer:${label}:${name === 'TimeoutError' || name === 'AbortError' ? 'timeout' : 'error'}`);
         }
       }
+      if (outOfTime || (stop && !dead.has(pi))) break;
     }
   }
 

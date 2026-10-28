@@ -1,6 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('@/lib/db', () => ({ connectToDatabase: vi.fn(async () => undefined) }));
+vi.mock('@/lib/services/summarizer', async () => {
+  const actual = await vi.importActual<typeof import('../services/summarizer')>('../services/summarizer');
+  return { ...actual, summarizeBatch: vi.fn(actual.summarizeBatch) };
+});
 vi.mock('@/lib/sources', () => ({ fetchAllSources: vi.fn(async () => ({ articles: [], failures: [] })) }));
 
 import { selectPool, computeExpireAt, attachBodies } from '../services/ingest';
@@ -325,5 +329,43 @@ describe('buildOps never persists body', () => {
     const json = JSON.stringify(ops);
     expect(json).not.toContain('SECRET BODY TEXT');
     expect(json).not.toMatch(/"body"/);
+  });
+});
+
+describe('isLlmEligible / orderForSummary', () => {
+  it('requires a body or a description of at least 200 chars', async () => {
+    const { isLlmEligible } = await import('../services/ingest');
+    expect(isLlmEligible({ description: 'x'.repeat(150) })).toBe(false);
+    expect(isLlmEligible({})).toBe(false);
+    expect(isLlmEligible({ description: 'x'.repeat(200) })).toBe(true);
+    expect(isLlmEligible({ body: 'b' })).toBe(true);
+  });
+  it('moves bodied items first, keeping relative order', async () => {
+    const { orderForSummary } = await import('../services/ingest');
+    const items = [mk('a', 0.9, ['ai']), { ...mk('b', 0.8, ['ai']), body: 'B' }, mk('c', 0.7, ['ai']), { ...mk('d', 0.6, ['ai']), body: 'D' }];
+    expect(orderForSummary(items).map((i) => i.url)).toEqual(['b', 'd', 'a', 'c']);
+  });
+});
+
+describe('summarizeNew eligibility', () => {
+  it('gives ineligible items an extractive summary and never sends them to summarizeBatch', async () => {
+    const { summarizeNew } = await import('../services/ingest');
+    const { summarizeBatch } = await import('../services/summarizer');
+    const spy = vi.mocked(summarizeBatch);
+    spy.mockClear();
+    spy.mockImplementation(async (items) => ({
+      summaries: new Map(items.map((i) => [i.url, { tldr: 't', bullets: [], provider: 'groq' as const }])),
+      llmCalls: 1,
+      failures: [],
+    }));
+    const short = { ...mk('short', 0.9, ['ai']), description: 'x'.repeat(150) };
+    const long = { ...mk('long', 0.5, ['ai']), description: 'y'.repeat(200) };
+    const bodied = { ...mk('bodied', 0.1, ['ai']), body: 'some body' };
+    const r = await summarizeNew([short, long, bodied], Date.now() + 60_000, Date.now, 0, 0, 1, 0);
+    const sent = spy.mock.calls[0][0].map((i) => i.url);
+    expect(sent).toEqual(['bodied', 'long']);
+    expect(r.summaries.get('short')!.provider).toBe('extractive');
+    expect(r.summaries.get('long')!.provider).toBe('groq');
+    expect(spy.mock.calls[0][2]).toMatchObject({ concurrency: 1, minGapMs: 0 });
   });
 });

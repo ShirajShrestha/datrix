@@ -4,7 +4,7 @@ import { runIngest } from '@/lib/services/ingest';
 async function main(): Promise<void> {
   let code = 1;
   try {
-    const report = await runIngest({ budgetMs: 600_000, poolPerCategory: 40, bodyMax: 40, retry429Ms: 20_000 });
+    const report = await runIngest({ budgetMs: 600_000, poolPerCategory: 40, bodyMax: 40, summarizeConcurrency: 1, minCallGapMs: 18_000, retry429Ms: 60_000 });
     console.log(JSON.stringify(report, null, 2));
     code = report.fetched === 0 ? 1 : 0;
   } catch (e) {

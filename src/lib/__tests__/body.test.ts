@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { extractReadableText, fetchBody, resolveBodies } from '@/lib/services/body';
+import { extractReadableText, fetchBody, resolveBodies, isPaywalledHost } from '@/lib/services/body';
 import { MAX_BODY_CHARS } from '@/lib/sources/types';
 
 const para = (n: number) =>
@@ -104,5 +104,23 @@ describe('resolveBodies', () => {
   it('treats a throwing fetchBody as null', async () => {
     const m = await resolveBodies(items, { max: 6, deadlineAt: 1e9, now: () => 0, fetchBody: async () => { throw new Error('x'); } });
     expect(m.size).toBe(0);
+  });
+});
+
+describe('paywalled hosts', () => {
+  it('matches listed hosts and subdomains only', () => {
+    expect(isPaywalledHost('https://www.nytimes.com/a')).toBe(true);
+    expect(isPaywalledHost('https://nytimes.com/a')).toBe(true);
+    expect(isPaywalledHost('https://www.wsj.com/a')).toBe(true);
+    expect(isPaywalledHost('https://ft.com/a')).toBe(true);
+    expect(isPaywalledHost('https://www.bloomberg.com/a')).toBe(true);
+    expect(isPaywalledHost('https://nytimes.com.evil.example/a')).toBe(false);
+    expect(isPaywalledHost('https://notnytimes.com/a')).toBe(false);
+    expect(isPaywalledHost('not a url')).toBe(false);
+  });
+  it('fetchBody returns null without a request for a paywalled host', async () => {
+    const f = vi.spyOn(globalThis, 'fetch');
+    expect(await fetchBody('https://www.nytimes.com/a')).toBeNull();
+    expect(f).not.toHaveBeenCalled();
   });
 });

@@ -3,7 +3,7 @@ import { fetchAllSources } from '@/lib/sources';
 import { scoreArticles, deduplicateArticles, unionImages, MAX_SOURCES, type ScoredArticle } from '@/lib/services/scoring';
 import { resolveImages } from '@/lib/services/images';
 import { connectToDatabase } from '@/lib/db';
-import { summarizeBatch, type SummaryInput } from '@/lib/services/summarizer';
+import { summarizeBatch, extractiveSummary, type SummaryInput } from '@/lib/services/summarizer';
 import { resolveBodies } from '@/lib/services/body';
 import { Article } from '@/lib/models/Article';
 
@@ -208,13 +208,26 @@ export function attachBodies(needSummary: ScoredArticle[], bodies: Map<string, s
 }
 
 const BODY_DEADLINE_MARGIN_MS = 30_000;
+const MIN_LLM_DESCRIPTION_CHARS = 200;
 
-async function summarizeNew(
+/** Worth an LLM call: has article text, or a description long enough to summarize. */
+export function isLlmEligible(a: { body?: string; description?: string }): boolean {
+  return Boolean(a.body) || (a.description?.length ?? 0) >= MIN_LLM_DESCRIPTION_CHARS;
+}
+
+/** Items with a body first; relative order is otherwise preserved. */
+export function orderForSummary<T extends ScoredArticle>(items: T[]): T[] {
+  return [...items.filter((i) => i.body), ...items.filter((i) => !i.body)];
+}
+
+export async function summarizeNew(
   items: ScoredArticle[],
   deadlineAt: number,
   now: () => number,
   bodyMax: number,
   retry429Ms: number,
+  concurrency = 3,
+  minGapMs = 0,
 ): Promise<{ summaries: Map<string, StoredSummary>; llmCalls: number; failures: string[]; bodies: number }> {
   let bodies = new Map<string, string>();
   if (items.length > 0) {
@@ -225,9 +238,25 @@ async function summarizeNew(
     bodies = fetched;
     for (const a of items) if (a.body && !bodies.has(a.url)) bodies.set(a.url, a.body);
   }
-  const inputs = attachBodies(items, bodies);
-  const r = await summarizeBatch(inputs, undefined, { deadlineAt, now, retry429Ms });
-  return { ...r, bodies: inputs.filter((i) => i.body).length };
+  // Order and eligibility use the resolved body (feed or fetched), not just the feed one.
+  const withBody = items.map((i) => (bodies.has(i.url) ? { ...i, body: bodies.get(i.url) } : i));
+  const ordered = orderForSummary(withBody);
+  const eligible = ordered.filter(isLlmEligible);
+  const inputs = attachBodies(eligible, bodies);
+  const summaries = new Map<string, StoredSummary>();
+  // Nothing worth sending to an LLM: store an extractive summary directly.
+  for (const i of ordered) {
+    if (!isLlmEligible(i)) summaries.set(i.url, extractiveSummary({ url: i.url, title: i.title, description: i.description }));
+  }
+  let llmCalls = 0;
+  let failures: string[] = [];
+  if (inputs.length > 0) {
+    const r = await summarizeBatch(inputs, undefined, { deadlineAt, now, retry429Ms, concurrency, minGapMs });
+    for (const [u, v] of r.summaries) summaries.set(u, v);
+    llmCalls = r.llmCalls;
+    failures = r.failures;
+  }
+  return { summaries, llmCalls, failures, bodies: inputs.filter((i) => i.body).length };
 }
 
 function hostOf(url: string): string {
@@ -248,7 +277,7 @@ function cleanCategories(cats: string[]): CategorySlug[] {
 }
 
 export async function runIngest(
-  opts: { clock?: () => number; budgetMs?: number; poolPerCategory?: number; bodyMax?: number; retry429Ms?: number } = {},
+  opts: { clock?: () => number; budgetMs?: number; poolPerCategory?: number; bodyMax?: number; retry429Ms?: number; summarizeConcurrency?: number; minCallGapMs?: number } = {},
 ): Promise<IngestReport> {
   const budgetMs = opts.budgetMs ?? INGEST_BUDGET_MS;
   const poolPerCategory = opts.poolPerCategory ?? POOL_PER_CATEGORY;
@@ -328,6 +357,7 @@ export async function runIngest(
   const { needSummary, llmSummaryUrls } = selectNeedSummary(valid, existing);
   const { summaries, llmCalls, failures: summarizerFailures, bodies } = await summarizeNew(
     needSummary, startedAt + budgetMs - SUMMARY_WRITE_RESERVE_MS, clock, opts.bodyMax ?? 0, opts.retry429Ms ?? 0,
+    opts.summarizeConcurrency ?? 3, opts.minCallGapMs ?? 0,
   );
   report.llmCalls = llmCalls;
   report.bodies = bodies;

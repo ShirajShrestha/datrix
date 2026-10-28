@@ -72,7 +72,20 @@ async function readCapped(res: Response): Promise<string | null> {
   return new TextDecoder().decode(Buffer.concat(chunks));
 }
 
+const PAYWALLED_HOSTS = ['nytimes.com', 'wsj.com', 'ft.com', 'bloomberg.com'];
+
+/** True for hard-paywalled publishers (and their subdomains), whose pages yield no readable text. */
+export function isPaywalledHost(url: string): boolean {
+  try {
+    const h = new URL(url).hostname.toLowerCase().replace(/\.$/, '');
+    return PAYWALLED_HOSTS.some((p) => h === p || h.endsWith(`.${p}`));
+  } catch {
+    return false;
+  }
+}
+
 export async function fetchBody(url: string, opts: { timeoutMs?: number } = {}): Promise<string | null> {
+  if (isPaywalledHost(url)) return null;
   try {
     const signal = AbortSignal.timeout(opts.timeoutMs ?? 8000);
     let current = allowed(url);
@@ -115,7 +128,7 @@ export async function resolveBodies(
   const queue: string[] = [];
   for (const it of items) {
     if (it.body) out.set(it.url, it.body);
-    else if (!out.has(it.url) && !queue.includes(it.url)) queue.push(it.url);
+    else if (!out.has(it.url) && !queue.includes(it.url) && !isPaywalledHost(it.url)) queue.push(it.url);
   }
   const todo = queue.slice(0, Math.max(0, opts.max));
   let next = 0;
