@@ -54,6 +54,7 @@
   --cat-entertainment: var(--tone-business);
   --cat-education: var(--tone-science);
   --cat-society: var(--tone-other);
+  --cat-nepal: var(--tone-politics);
 }
 
 .dark {

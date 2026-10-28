@@ -1,6 +1,6 @@
 export type CategorySlug =
   | 'ai' | 'technology' | 'business' | 'world' | 'geopolitics' | 'politics' | 'law'
-  | 'science' | 'health' | 'environment' | 'sports' | 'entertainment' | 'education' | 'society';
+  | 'science' | 'health' | 'environment' | 'sports' | 'entertainment' | 'education' | 'society' | 'nepal';
 
 export interface FeedDef { url: string; source: string }
 
@@ -161,6 +161,20 @@ export const CATEGORIES: CategoryDef[] = [
     feeds: [G('society')],
     guardianSections: ['society', 'inequality', 'global-development'],
     keywords: ['migration', 'immigrant', 'immigration', 'inequality', 'poverty', 'homeless', 'gender', 'social media', 'protest', 'housing'],
+  },
+  {
+    slug: 'nepal', label: 'Nepal', emoji: '🇳🇵',
+    description: 'News from and about Nepal',
+    color: 'var(--cat-nepal)', weight: 1.0,
+    feeds: [
+      { url: 'https://english.onlinekhabar.com/feed', source: 'Online Khabar English' },
+      { url: 'https://risingnepaldaily.com/rss', source: 'The Rising Nepal' },
+      { url: 'https://www.nepalitimes.com/feed', source: 'Nepali Times' },
+      { url: 'https://nepalnews.com/feed', source: 'Nepal News' },
+      { url: 'https://english.khabarhub.com/feed', source: 'Khabarhub' },
+    ],
+    guardianSections: [],
+    keywords: ['nepal', 'nepali', 'nepalese', 'kathmandu', 'pokhara', 'kp oli', 'himalaya', 'sherpa'],
   },
 ];
 

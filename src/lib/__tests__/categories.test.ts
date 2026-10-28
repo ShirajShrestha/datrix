@@ -1,12 +1,26 @@
 import { describe, it, expect } from 'vitest';
 import { CATEGORIES, getCategory, normalizeSlug, tagCategories, GENERIC_KEYWORDS } from '../categories';
 
-const ORDER = ['ai','technology','business','world','geopolitics','politics','law','science','health','environment','sports','entertainment','education','society'];
+const ORDER = ['ai','technology','business','world','geopolitics','politics','law','science','health','environment','sports','entertainment','education','society','nepal'];
+
+describe('nepal category', () => {
+  it('is registered', () => {
+    const c = getCategory('nepal')!;
+    expect(c.label).toBe('Nepal');
+    expect(c.emoji).toBe('🇳🇵');
+    expect(c.weight).toBe(1.0);
+    expect(c.guardianSections).toEqual([]);
+  });
+  it('tags nepal from a single specific keyword', () => {
+    expect(tagCategories('world', 'Kathmandu protest turns violent')).toContain('nepal');
+    expect(tagCategories('world', 'Nepalese climbers reach summit')).toContain('nepal');
+  });
+});
 
 describe('category registry', () => {
-  it('has 14 unique slugs in spec order', () => {
+  it('has 15 unique slugs in spec order', () => {
     expect(CATEGORIES.map((c) => c.slug)).toEqual(ORDER);
-    expect(new Set(CATEGORIES.map((c) => c.slug)).size).toBe(14);
+    expect(new Set(CATEGORIES.map((c) => c.slug)).size).toBe(15);
   });
   it('every category is complete', () => {
     for (const c of CATEGORIES) {

@@ -16,7 +16,7 @@ describe('categoryPicker helpers', () => {
     expect(orderedSlugs(['world', 'ai', 'world'])).toEqual(['ai', 'world']);
     expect(orderedCategories(['law', 'ai']).map((c) => c.slug)).toEqual(['ai', 'law']);
   });
-  it('covers all 14', () => {
-    expect(ALL_CATEGORY_SLUGS).toHaveLength(14);
+  it('covers all 15', () => {
+    expect(ALL_CATEGORY_SLUGS).toHaveLength(15);
   });
 });

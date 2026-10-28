@@ -47,9 +47,19 @@ describe('sanitizePrefs', () => {
   });
 });
 
+describe('sanitizePrefs old saved lists', () => {
+  it('keeps the 14 old slugs without injecting nepal', () => {
+    const old = ['ai','technology','business','world','geopolitics','politics','law','science','health','environment','sports','entertainment','education','society'];
+    expect(sanitizePrefs({ categories: old }).categories).toEqual(old);
+  });
+});
+
 describe('effectiveCategories', () => {
-  it('[] returns all 14', () => {
-    expect(effectiveCategories({ ...DEFAULT_PREFS, categories: [] })).toHaveLength(14);
+  it('[] returns all 15', () => {
+    expect(effectiveCategories({ ...DEFAULT_PREFS, categories: [] })).toHaveLength(15);
+  });
+  it('DEFAULT_PREFS includes nepal', () => {
+    expect(effectiveCategories(DEFAULT_PREFS)).toContain('nepal');
   });
   it('returns selection otherwise', () => {
     expect(effectiveCategories({ ...DEFAULT_PREFS, categories: ['ai'] })).toEqual(['ai']);
