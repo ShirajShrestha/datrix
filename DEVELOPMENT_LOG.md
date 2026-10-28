@@ -2,6 +2,14 @@
 
 # NewsIntel Development Log
 
+## Latest Update: Fresh and Real (Datrix)
+
+### 9. Fresh-and-real ingest, Nepal and summaries from article text
+- **Date:** 2026-10-28
+- **Description:** Today now ranks by recency (48 h window, widened to 168 h when thin), has a Global/Local toggle backed by a new `nepal` category (15 categories), and the ingest runs as a script from GitHub Actions every 2 hours. Summaries are built from article text (feed body or Readability page fetch, never stored). The retired Groq default model was replaced with `qwen/qwen3.8-27b`; before that every Groq call 404ed and all summaries were extractive.
+- **Verification:** live `npm run ingest` exit 0 (fetched 1696, kept 438, created 10, updated 428, llmSummarized 20, bodies 115, one `summarizer:groq:429` failure); `/api/articles` returns no `body` key and only fresh items; build, tests, tsc and lint pass.
+- **Why:** summaries were stale and shallow (RSS description only); readers now get recent stories with details from the article itself.
+
 ## Project Overview
 
 **NewsIntel** - An AI-powered news intelligence app that aggregates, ranks, and summarizes the most important global news into concise, readable insights.

@@ -8,11 +8,15 @@ Datrix aggregates news from RSS feeds and news APIs, removes duplicate stories, 
 
 ## Features
 
-- 14 categories, chosen at onboarding and changeable in Settings.
+- 15 categories, chosen at onboarding and changeable in Settings. The 15th, Nepal, is not part of the saved categories: it is reached through the Global/Local toggle.
+- Global / Local toggle on Today: Global shows your saved categories (Nepal excluded), Local shows only Nepal stories (five English-language Nepali feeds), even if Nepal is not in your saved categories. The choice is stored on the device (`datrix_scope`) and survives a reload.
+- Fresh first: Today and the digest ask for the last 48 hours (`fresh=48`) and rank by importance decayed with a 24 h half-life, so newer stories win. If fewer than 12 stories fall in the window, the API widens it to 168 h.
 - Multi-source ingest: RSS feeds, Guardian Open Platform, GNews, MediaStack.
 - Deduplication: the same story from several outlets becomes one card ("N sources", each with its own link).
 - Image cards, with an `og:image` page fetch as a fallback when a feed has no image.
-- Summaries (TL;DR, key points, why it matters): Groq first, then Gemini Flash, then an extractive fallback. Only articles without an LLM summary are sent to a provider.
+- Summaries (TL;DR, key points, why it matters): Groq first (default model `qwen/qwen3.8-27b`), then Gemini Flash, then an extractive fallback. Only articles without an LLM summary are sent to a provider.
+- Summaries from article text: the ingest takes the body from the feed when it has one, otherwise fetches the article page and extracts readable text with Mozilla Readability (free, no API; capped page fetches per run). The text is sent to the summarizer only (batches of 4 when text is present, else 8) and is never stored; articles without usable text fall back to the RSS description. A missing `GEMINI_API_KEY` just skips Gemini.
+- Ingest every 2 hours from GitHub Actions (`ingest.yml`), so the feed stays fresh.
 - Installable PWA: offline fallback page and the last loaded feed available offline.
 - Daily Web Push at a time you choose (default 08:00 in your own time zone).
 - Story modal: open a story (title or "Read more") for a short brief, an image gallery and links to every outlet (see "Story modal and briefs").
@@ -29,12 +33,13 @@ Datrix aggregates news from RSS feeds and news APIs, removes duplicate stories, 
 | `geopolitics` | 🌐 Geopolitics | `entertainment` | 🎬 Entertainment |
 | `politics` | 🏛️ Politics | `education` | 🎓 Education |
 | `law` | ⚖️ Law & Justice | `society` | 👥 Society & Culture |
+| `nepal` | 🇳🇵 Nepal (Local toggle) | | |
 
-Legacy slugs `tech` and `economy` are mapped to `technology` and `business`. An article can carry several categories (keyword tagging on top of its primary one). Category definitions, feeds and API mappings are in `src/lib/categories.ts`.
+Legacy slugs `tech` and `economy` are mapped to `technology` and `business`. An article can carry several categories (keyword tagging on top of its primary one). The Nepal category is tagged by its own feeds and keywords and is shown only in Local scope. Category definitions, feeds and API mappings are in `src/lib/categories.ts`.
 
 ## Architecture
 
-- **Ingest pipeline** (`src/lib/services/ingest.ts`, `GET /api/cron/news`): fetch all sources in parallel against a shared 35 s deadline (one failing or slow source does not stop the run; a slow one is reported as `timeout:<name>` in `failures`) -> score -> deduplicate (token-similarity within 48 h) -> keep the top 25 per category -> resolve missing images (at most 60 page fetches) -> summarize articles lacking an LLM summary (batches of 8 per call) -> bulk upsert into MongoDB. It works inside a 100 s time budget (route `maxDuration = 120`) and returns an `IngestReport`. Summarizer provider problems appear in `failures` as coarse entries such as `summarizer:groq:429` or `summarizer:gemini:timeout`. Articles whose url is not http(s) are dropped.
+- **Ingest pipeline** (`src/lib/services/ingest.ts`, `GET /api/cron/news`): fetch all sources in parallel against a shared 35 s deadline (one failing or slow source does not stop the run; a slow one is reported as `timeout:<name>` in `failures`) -> score -> deduplicate (token-similarity within 48 h) -> keep the top 25 per category -> resolve missing images (at most 60 page fetches) -> collect article text (feed body or Readability page fetch, not stored) -> summarize articles lacking an LLM summary (batches of 8, or 4 with text; one retry after a 429) -> bulk upsert into MongoDB. The route works inside a 100 s time budget (`maxDuration = 120`); the GitHub Actions script (`npm run ingest`) uses a 600 s budget, top 40 per category and up to 40 article-page fetches and returns an `IngestReport`. Summarizer provider problems appear in `failures` as coarse entries such as `summarizer:groq:429` or `summarizer:gemini:timeout`. Articles whose url is not http(s) are dropped.
 - **Read API** (`GET /api/articles`): reads stored articles, filtered by the categories the client sends. `GET /api/cron/digest` also exists but is not scheduled. The browser never calls the news APIs.
 - **Device-only prefs**: categories, notify time and onboarding state are stored in `localStorage` (`datrix_prefs`). Saved articles use `newsintel_saved_articles`.
 - **Push subscriptions** (`/api/push/subscribe`, `/api/push/unsubscribe`, `/api/push/test`): a subscription is stored (at most `MAX_PUSH_SUBSCRIPTIONS`, default 2000; over the cap the API answers 503 "Subscription limit reached") with its categories, preferred time and IANA time zone. `GET /api/cron/push` sends to subscriptions that are due (their local time has reached the preferred time, within a 3 hour catch-up window, and nothing was sent yet today). Changing the notification time after today's push already went out, or subscribing after the chosen time has already passed today, skips today's push until tomorrow.
@@ -64,7 +69,7 @@ Copy `.env.example` to `.env.local`. Never commit real values.
 | `VAPID_SUBJECT` | Required for push | Contact for push services, e.g. `mailto:you@example.com`. |
 | `MAX_PUSH_SUBSCRIPTIONS` | Optional | Cap on stored push subscriptions; default `2000`. Beyond it `POST /api/push/subscribe` returns 503 "Subscription limit reached". |
 
-With no source keys the app still ingests RSS. With no LLM keys, summaries are extractive.
+With no source keys the app still ingests RSS. With no LLM keys, summaries are extractive. A missing `GEMINI_API_KEY` only skips Gemini (Groq still runs).
 
 ### Generate VAPID keys
 
