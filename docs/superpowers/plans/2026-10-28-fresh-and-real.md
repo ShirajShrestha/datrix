@@ -222,6 +222,24 @@
 - [ ] **Step 3:** Push the branch, trigger "Ingest News" via `workflow_dispatch`. Expected: green run under 10 minutes; scheduled run follows 2 hours later.
 - [ ] **Step 4:** Update README (features: Nepal, recency, article-text summaries; categories table to 15) and add a dated entry to `DEVELOPMENT_LOG.md`. Commit `docs: document fresh-and-real changes`.
 
+### Task 10: Pace the summarizer to Groq's free limits
+
+Added after Task 9's live run: Groq's free tier for the default model allows 8,000 tokens/minute (response header `x-ratelimit-limit-tokens: 8000`); calls of 4 bodied articles cost roughly 2.5-3k tokens, so three concurrent calls hit 429 within seconds and only 20 of 438 articles got an LLM summary, all of them paywalled NYT stories with no body (nothing beyond the description to summarize).
+
+**Files:**
+- Modify: `src/lib/services/summarizer/index.ts`, `src/lib/services/ingest.ts`, `src/lib/services/body.ts`, `scripts/ingest.ts`, `README.md` (ingest section)
+- Test: `src/lib/__tests__/summarizer.test.ts`, `src/lib/__tests__/ingest.test.ts`, `src/lib/__tests__/body.test.ts`
+
+**Interfaces:**
+- Produces: `SummarizeOpts.minGapMs?: number` (default 0): minimum ms between the starts of two calls to the same provider, enforced with the injected `sleep` and `now`. `runIngest` opts gain `summarizeConcurrency?: number` (default 3, today's value) and `minCallGapMs?: number` (default 0). In `ingest.ts`: `isLlmEligible(a: { body?: string; description?: string }): boolean` (true when a body is present or the description is at least 200 chars) and `orderForSummary<T extends ScoredArticle>(items: T[]): T[]` (items with a body first, otherwise the existing order). In `body.ts`: `isPaywalledHost(url: string): boolean` (nytimes.com, wsj.com, ft.com, bloomberg.com and their subdomains); `fetchBody` returns `null` for those hosts without making a request, and `resolveBodies` therefore does not spend fetch slots on them.
+- `scripts/ingest.ts` passes `summarizeConcurrency: 1, minCallGapMs: 18_000, retry429Ms: 60_000`.
+
+- [ ] **Step 1: Write failing tests.** summarizer: with `minGapMs: 18000`, `concurrency: 1`, injected `now`/`sleep`, three calls to one provider sleep for the remaining gap before calls 2 and 3 and never before call 1; with the default `minGapMs` nothing ever sleeps. body: `isPaywalledHost('https://www.nytimes.com/a')` true, `'https://nytimes.com.evil.example/a'` false, `'https://notnytimes.com/a'` false; `fetchBody` of an nytimes URL resolves `null` with `fetch` not called. ingest: `isLlmEligible` is false for a 150-char description with no body, true for 200 chars, true for any body; `orderForSummary` moves bodied items first and keeps relative order within each group; items that are not eligible receive an `extractive` summary in the final summaries map and are never passed to `summarizeBatch`.
+- [ ] **Step 2:** Run the three files. Expected: FAIL.
+- [ ] **Step 3:** Implement per the Interfaces block. In `runIngest`, after body resolution: order with `orderForSummary`, split with `isLlmEligible`, send eligible items to `summarizeBatch` (with `minGapMs`, `concurrency`), and build extractive summaries (`extractiveSummary`) directly for the rest.
+- [ ] **Step 4:** Run `npm test`, `npx tsc --noEmit`, `npm run lint`. Expected: all clean.
+- [ ] **Step 5:** Update the README ingest section (pacing, eligibility rule, paywalled hosts) and commit `fix: pace summarizer to free-tier token limits and skip no-text articles`.
+
 ---
 
 ## Self-review
