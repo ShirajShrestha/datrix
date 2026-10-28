@@ -7,7 +7,13 @@
 ### 9. Fresh-and-real ingest, Nepal and summaries from article text
 - **Date:** 2026-10-28
 - **Description:** Today now ranks by recency (48 h window, widened to 168 h when thin), has a Global/Local toggle backed by a new `nepal` category (15 categories), and the ingest runs as a script from GitHub Actions every 2 hours. Summaries are built from article text (feed body or Readability page fetch, never stored). The retired Groq default model was replaced with `qwen/qwen3.8-27b`; before that every Groq call 404ed and all summaries were extractive.
-- **Verification:** live `npm run ingest` exit 0 (fetched 1696, kept 438, created 10, updated 428, llmSummarized 20, bodies 115, one `summarizer:groq:429` failure); `/api/articles` returns no `body` key and only fresh items; build, tests, tsc and lint pass.
+- **Verification (done):** live `npm run ingest` exit 0 (fetched 1696, kept 438, created 10, updated 428, llmSummarized 20, bodies 115, one `summarizer:groq:429` failure). `GET /api/articles?fresh=48` returned no `body` key and only items under 48 h old in the sample checked; the API applies the window only when the client passes `fresh=48` (Today and Digest do) and widens it to 7 days when fewer than 12 qualify. Build, tests, tsc and lint pass.
+- **Not verified / known limits:**
+  - Browser checks (Global/Local toggle, persistence across reload, Local without Nepal in Settings, nothing older than 48 h in lead/Keep up) were NOT done: the Chrome extension was not connected.
+  - Guardian and Online Khabar summary quality was NOT checked: no groq summary landed on them in the run.
+  - `workflow_dispatch`/push was NOT done: the branch is not pushed and the repo is still private.
+  - That live run gave only 20 of 438 LLM summaries: Groq's free tier for the default model allows 8,000 tokens/min and requests were 429'd. The five NYT tl;drs checked only restated the RSS description.
+- **Follow-up fixes:** Task 10 paces summarizer calls one at a time with a minimum gap, sends articles with article text first, does not send articles with neither article text nor a description of at least 200 characters to the LLM (they keep extractive summaries), and does not page-fetch nytimes/wsj/ft/bloomberg. Task 11 gates GNews/MediaStack to a few runs a day. The effect of this pacing on LLM coverage has NOT yet been measured in a live run.
 - **Why:** summaries were stale and shallow (RSS description only); readers now get recent stories with details from the article itself.
 
 ## Project Overview
