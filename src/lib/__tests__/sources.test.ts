@@ -27,6 +27,13 @@ import { SourceError } from '../sources/types';
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe('sources', () => {
+  it('mapGuardianResult sets body from bodyText only when long enough', () => {
+    const r = { webTitle: 'T', webUrl: 'https://g.com/a', webPublicationDate: '2026-10-18T08:00:00Z' };
+    expect(mapGuardianResult({ ...r, fields: { bodyText: 'a'.repeat(1000) } }, 'world')?.body).toBe('a'.repeat(1000));
+    expect(mapGuardianResult({ ...r, fields: { bodyText: 'a'.repeat(10) } }, 'world')?.body).toBeUndefined();
+    expect(mapGuardianResult(r, 'world')?.body).toBeUndefined();
+    expect(mapGuardianResult({ ...r, fields: { bodyText: 'a'.repeat(9000) } }, 'world')?.body).toHaveLength(6000);
+  });
   it('mapGuardianResult maps thumbnail and trailText', () => {
     const a = mapGuardianResult({
       webTitle: 'Hello', webUrl: 'https://g.com/a', webPublicationDate: '2026-01-01T00:00:00Z',

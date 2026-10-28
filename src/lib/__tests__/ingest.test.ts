@@ -135,6 +135,12 @@ describe('mergeByUrl', () => {
     expect(out[0].sources).toHaveLength(2);
     expect(out[0].imageUrl).toBe('http://i/1');
   });
+  it('keeps a body from any member of the merged group', () => {
+    const a = { ...mk('u', 0.5, ['ai']), body: 'body from a' };
+    const b = { ...mk('u', 0.9, ['world']) };
+    expect(mergeByUrl([a, b])[0].body).toBe('body from a');
+    expect(mergeByUrl([{ ...a, importanceScore: 0.9 }, { ...b, body: 'body from b', importanceScore: 0.1 }])[0].body).toBe('body from a');
+  });
   it('leaves distinct urls alone', () => {
     expect(mergeByUrl([mk('a', 1, ['ai']), mk('b', 1, ['ai'])])).toHaveLength(2);
   });
@@ -156,6 +162,13 @@ describe('buildOps', () => {
     expect(u.update.$set.summary).toEqual(sum);
     expect(u.update.$set.updatedAt).toEqual(now);
     expect('imageUrl' in u.update.$set).toBe(false);
+  });
+  it('never writes body to $set or $setOnInsert', () => {
+    const a = { ...mk('u1', 0.5, ['ai']), body: 'SECRET BODY' };
+    const [op] = buildOps([a], new Map([['u1', sum]]), new Set(), now);
+    expect(JSON.stringify(op.updateOne.update)).not.toContain('SECRET BODY');
+    expect('body' in op.updateOne.update.$set).toBe(false);
+    expect('body' in op.updateOne.update.$setOnInsert).toBe(false);
   });
   it('no summary when none new or already stored; imageUrl only when present', () => {
     const a = { ...mk('u1', 0.5, ['ai']), imageUrl: 'http://i' };

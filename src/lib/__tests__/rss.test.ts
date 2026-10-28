@@ -5,6 +5,19 @@ const feed = { url: 'https://example.com/rss', source: 'Example' };
 const base = { title: 'Hello', link: 'https://example.com/a', isoDate: '2026-10-18T08:00:00.000Z' };
 
 describe('parseRssItem', () => {
+  it('sets body from content:encoded when long enough, stripped and capped', () => {
+    const long = '<p>' + 'word '.repeat(2000) + '</p>';
+    const a = parseRssItem({ ...base, 'content:encoded': long }, feed, 'world');
+    expect(a?.body).toBeDefined();
+    expect(a!.body!.length).toBeLessThanOrEqual(6000);
+    expect(a!.body).not.toContain('<');
+    const mid = parseRssItem({ ...base, 'content:encoded': '<p>' + 'x'.repeat(500) + '</p>' }, feed, 'world');
+    expect(mid?.body).toBe('x'.repeat(500));
+  });
+  it('leaves body undefined for short content:encoded', () => {
+    const a = parseRssItem({ ...base, 'content:encoded': '<p>' + 'x'.repeat(100) + '</p>' }, feed, 'world');
+    expect(a?.body).toBeUndefined();
+  });
   it('reads media:thumbnail', () => {
     const a = parseRssItem({ ...base, 'media:thumbnail': { $: { url: 'https://img.example.com/t.jpg' } } }, feed, 'world');
     expect(a?.imageUrl).toBe('https://img.example.com/t.jpg');

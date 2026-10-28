@@ -80,6 +80,7 @@ export function mergeByUrl<T extends ScoredArticle>(items: T[]): T[] {
       categories: [...new Set([...best.categories, ...other.categories])],
       sources: sources.slice(0, MAX_SOURCES),
       imageUrl: best.imageUrl || other.imageUrl,
+      body: best.body || other.body,
       images: unionImages(best.images, other.images),
     });
   }

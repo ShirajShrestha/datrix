@@ -11,6 +11,8 @@ export interface ScoredArticle {
   publishedAt: Date;
   description?: string;
   imageUrl?: string;
+  /** Plain-text body for summarizing. In-memory only; never persisted or returned by the API. */
+  body?: string;
   /** Gallery images: canonical's first, deduped, http(s) only, max MAX_IMAGES. */
   images?: string[];
   sources: SourceRef[];
@@ -281,6 +283,7 @@ export function deduplicateArticles(articles: ScoredArticle[]): ScoredArticle[] 
       categories,
       sources: sources.slice(0, MAX_SOURCES),
       imageUrl,
+      body: ordered.find((a) => a.body)?.body,
       images: unionImages(...ordered.map((a) => a.images)),
     };
   });

@@ -1,6 +1,6 @@
 import Parser from 'rss-parser';
 import { CATEGORIES, type CategorySlug, type FeedDef } from '@/lib/categories';
-import { SourceError, type RawArticle } from './types';
+import { SourceError, MIN_BODY_CHARS, MAX_BODY_CHARS, type RawArticle } from './types';
 
 interface MediaNode { $?: { url?: string; medium?: string; type?: string } }
 
@@ -55,6 +55,17 @@ function truncate(s: string, max: number): string {
   const c = s.charCodeAt(end - 1);
   if (c >= 0xd800 && c <= 0xdbff) end--;
   return s.slice(0, end);
+}
+
+/** Plain-text body from HTML/text: undefined when shorter than MIN_BODY_CHARS; capped at MAX_BODY_CHARS on a word boundary. */
+export function toBody(raw: string | undefined, isHtml = true): string | undefined {
+  if (!raw) return undefined;
+  const text = isHtml ? stripHtml(raw) : raw.replace(/\s+/g, ' ').trim();
+  if (text.length < MIN_BODY_CHARS) return undefined;
+  if (text.length <= MAX_BODY_CHARS) return text;
+  const cut = truncate(text, MAX_BODY_CHARS);
+  const sp = cut.lastIndexOf(' ');
+  return sp > MAX_BODY_CHARS * 0.8 ? cut.slice(0, sp) : cut;
 }
 
 function nodes(n: MediaNode | MediaNode[] | undefined): MediaNode[] {
@@ -129,6 +140,7 @@ export function parseRssItem(item: RssItem, feed: FeedDef, category: CategorySlu
     publishedAt,
     description: description || undefined,
     imageUrl: extractImage(item),
+    body: toBody(item['content:encoded']),
   };
 }
 

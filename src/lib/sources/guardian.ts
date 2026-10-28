@@ -1,12 +1,12 @@
 import { CATEGORIES, type CategorySlug } from '@/lib/categories';
 import { SourceError, type RawArticle } from './types';
-import { stripHtml } from './rss';
+import { stripHtml, toBody } from './rss';
 
 export interface GuardianResult {
   webTitle?: string;
   webUrl?: string;
   webPublicationDate?: string;
-  fields?: { thumbnail?: string; trailText?: string };
+  fields?: { thumbnail?: string; trailText?: string; bodyText?: string };
 }
 
 const TIMEOUT_MS = 8000;
@@ -26,6 +26,7 @@ export function mapGuardianResult(r: GuardianResult, category: CategorySlug): Ra
     publishedAt,
     description: description || undefined,
     imageUrl: r.fields?.thumbnail || undefined,
+    body: toBody(r.fields?.bodyText, false),
   };
 }
 
@@ -33,7 +34,7 @@ async function fetchSection(section: string, key: string): Promise<GuardianResul
   try {
     const qs = new URLSearchParams({
       section,
-      'show-fields': 'thumbnail,trailText',
+      'show-fields': 'thumbnail,trailText,bodyText',
       'order-by': 'newest',
       'page-size': '15',
       'api-key': key,

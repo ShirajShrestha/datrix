@@ -9,6 +9,11 @@ describe('toArticleDTO', () => {
     expect(dto.sources).toEqual([{ name: 'A', url: 'https://a' }]);
     expect(JSON.stringify(dto)).not.toContain('secret');
   });
+  it('never outputs body', () => {
+    const dto = toArticleDTO({ ...base, body: 'full article text' });
+    expect('body' in dto).toBe(false);
+    expect(JSON.stringify(dto)).not.toContain('full article text');
+  });
   it('defaults images and tolerates missing fields', () => {
     const dto = toArticleDTO(base);
     expect(dto.images).toEqual([]);

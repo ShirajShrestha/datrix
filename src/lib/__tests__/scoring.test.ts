@@ -25,6 +25,15 @@ describe('deduplicateArticles', () => {
     ]);
   });
 
+  it('merged article keeps canonical body, else any member body', () => {
+    const mkPair = (b1?: string, b2?: string) => deduplicateArticles([
+      mk({ url: 'u1', importanceScore: 0.9, body: b1 }),
+      mk({ source: 'NYT', url: 'u2', sources: [{ name: 'NYT', url: 'u2' }], importanceScore: 0.5, body: b2 }),
+    ]);
+    expect(mkPair('canon', 'other')[0].body).toBe('canon');
+    expect(mkPair(undefined, 'other')[0].body).toBe('other');
+  });
+
   it('merged article unions categories and keeps best image', () => {
     const out = deduplicateArticles([
       mk({ url: 'u1', categories: ['business'], importanceScore: 0.9 }),
