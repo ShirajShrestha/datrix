@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { CATEGORIES, getCategory, normalizeSlug, tagCategories } from '../categories';
+import { CATEGORIES, getCategory, normalizeSlug, tagCategories, GENERIC_KEYWORDS } from '../categories';
 
 const ORDER = ['ai','technology','business','world','geopolitics','politics','law','science','health','environment','sports','entertainment','education','society'];
 
@@ -52,6 +52,18 @@ describe('category registry', () => {
   });
   it('entertainment keeps its Guardian sections', () => {
     expect(getCategory('entertainment')?.guardianSections).toEqual(['culture', 'film', 'music', 'games', 'tv-and-radio']);
+  });
+
+  it('requires stronger evidence for secondary tags', () => {
+    expect(tagCategories('world', 'Oil prices rise as vote nears')).toEqual(['world']);
+    expect(tagCategories('world', 'New app lets cafes cut food waste')).toEqual(['world']);
+    const r = tagCategories('world', 'Prime minister opens bank branch');
+    expect(r).toContain('politics');
+    expect(r).not.toContain('business');
+  });
+  it('exports generic keywords', () => {
+    expect(GENERIC_KEYWORDS.has('oil')).toBe(true);
+    expect(GENERIC_KEYWORDS.has('stock')).toBe(false);
   });
 
   it('normalizeSlug rejects prototype keys', () => {

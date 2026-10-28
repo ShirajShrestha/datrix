@@ -178,16 +178,32 @@ export function normalizeSlug(raw: string): CategorySlug | null {
 }
 
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export const GENERIC_KEYWORDS: ReadonlySet<string> = new Set([
+  'app', 'war', 'oil', 'vote', 'trade', 'chip', 'drug', 'bank', 'import', 'export',
+  'market', 'campaign', 'space', 'trial', 'exam', 'film', 'students',
+]);
+
 const MATCHERS = CATEGORIES.map((c) => ({
   slug: c.slug,
-  re: new RegExp(`\\b(?:${c.keywords.map(esc).join('|')})(?:s|es|ed)?\\b`, 'i'),
+  kws: c.keywords.map((k) => ({
+    generic: GENERIC_KEYWORDS.has(k),
+    re: new RegExp(`\\b${esc(k)}(?:s|es|ed)?\\b`, 'i'),
+  })),
 }));
 
 export function tagCategories(primary: CategorySlug, title: string, description?: string): CategorySlug[] {
   const text = `${title} ${description ?? ''}`;
   const out: CategorySlug[] = [primary];
   for (const m of MATCHERS) {
-    if (m.slug !== primary && m.re.test(text)) out.push(m.slug);
+    if (m.slug === primary) continue;
+    let generic = 0;
+    let strong = false;
+    for (const k of m.kws) {
+      if (!k.re.test(text)) continue;
+      if (k.generic) generic++;
+      else { strong = true; break; }
+    }
+    if (strong || generic >= 2) out.push(m.slug);
   }
   return out;
 }
