@@ -1,4 +1,5 @@
 import { CATEGORIES, type CategoryDef, type CategorySlug } from '@/lib/categories';
+import { LOCAL_SLUG } from '@/lib/scope';
 
 /** Add the slug if absent, remove it if present. Returns a new array in registry order. */
 export function toggleCategory(selected: readonly CategorySlug[], slug: CategorySlug): CategorySlug[] {
@@ -20,4 +21,7 @@ export function orderedCategories(slugs: readonly CategorySlug[]): CategoryDef[]
   return CATEGORIES.filter((c) => set.has(c.slug));
 }
 
-export const ALL_CATEGORY_SLUGS: CategorySlug[] = CATEGORIES.map((c) => c.slug);
+/** Categories a user can pick; Nepal is Local-scope only. */
+export const SELECTABLE_CATEGORIES: CategoryDef[] = CATEGORIES.filter((c) => c.slug !== LOCAL_SLUG);
+
+export const ALL_CATEGORY_SLUGS: CategorySlug[] = SELECTABLE_CATEGORIES.map((c) => c.slug);

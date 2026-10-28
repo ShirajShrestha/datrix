@@ -9,6 +9,7 @@ import { NewsGridSkeleton } from '@/components/Skeletons';
 import { useStoryModal } from '@/components/StoryModalProvider';
 import { sourceNames } from '@/components/NewsCard';
 import { usePrefs, effectiveCategories } from '@/lib/prefs';
+import { scopeCategories } from '@/lib/scope';
 import { useHydrated } from '@/lib/useHydrated';
 import { useReadingStats } from '@/lib/useReadingStats';
 import { groupDigest, DIGEST_SIZE } from '@/lib/digest';
@@ -22,7 +23,7 @@ export default function DigestPage() {
   const [loading, setLoading] = useState(true);
   const hydrated = useHydrated();
   const [prefs] = usePrefs();
-  const chosenKey = effectiveCategories(prefs).join(',');
+  const chosenKey = scopeCategories('global', effectiveCategories(prefs)).join(',');
   const stats = useReadingStats();
   const { openStory } = useStoryModal();
 

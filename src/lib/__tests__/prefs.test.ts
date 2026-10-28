@@ -54,12 +54,24 @@ describe('sanitizePrefs old saved lists', () => {
   });
 });
 
-describe('effectiveCategories', () => {
-  it('[] returns all 15', () => {
-    expect(effectiveCategories({ ...DEFAULT_PREFS, categories: [] })).toHaveLength(15);
+describe('sanitizePrefs nepal', () => {
+  it('drops nepal from a stored list', () => {
+    expect(sanitizePrefs({ categories: ['ai', 'nepal', 'world'] }).categories).toEqual(['ai', 'world']);
   });
-  it('DEFAULT_PREFS includes nepal', () => {
-    expect(effectiveCategories(DEFAULT_PREFS)).toContain('nepal');
+  it('a list of only nepal becomes empty (effective = all non-nepal)', () => {
+    const p = sanitizePrefs({ categories: ['nepal'] });
+    expect(p.categories).toEqual([]);
+    expect(effectiveCategories(p)).not.toContain('nepal');
+  });
+});
+
+describe('effectiveCategories', () => {
+  it('[] returns all 14 selectable categories', () => {
+    expect(effectiveCategories({ ...DEFAULT_PREFS, categories: [] })).toHaveLength(14);
+  });
+  it('DEFAULT_PREFS does not include nepal', () => {
+    expect(effectiveCategories(DEFAULT_PREFS)).not.toContain('nepal');
+    expect(DEFAULT_PREFS.categories).toHaveLength(14);
   });
   it('returns selection otherwise', () => {
     expect(effectiveCategories({ ...DEFAULT_PREFS, categories: ['ai'] })).toEqual(['ai']);

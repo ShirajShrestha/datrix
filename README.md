@@ -8,8 +8,8 @@ Datrix aggregates news from RSS feeds and news APIs, removes duplicate stories, 
 
 ## Features
 
-- 15 categories, chosen at onboarding and changeable in Settings. The 15th, Nepal, is not part of the saved categories: it is reached through the Global/Local toggle.
-- Global / Local toggle on Today: Global shows your saved categories (Nepal excluded), Local shows only Nepal stories (five English-language Nepali feeds), even if Nepal is not in your saved categories. The choice is stored on the device (`datrix_scope`) and survives a reload.
+- 14 selectable categories, chosen at onboarding and changeable in Settings, plus a Nepal local feed. Nepal appears only under the Local toggle on Today: it is not in the Settings or onboarding category pickers, the daily digest, search filters or the daily push, and any stored `nepal` selection is dropped.
+- Global / Local toggle on Today: Global shows your saved categories (Nepal excluded), Local shows only Nepal stories (five English-language Nepali feeds). The choice is stored on the device (`datrix_scope`) and survives a reload.
 - Fresh first: Today and the digest ask for the last 48 hours (`fresh=48`) and rank by importance decayed with a 24 h half-life, so newer stories win. If fewer than 12 stories fall in the window, the API widens it to 168 h.
 - Multi-source ingest: RSS feeds, Guardian Open Platform, GNews, MediaStack.
 - Deduplication: the same story from several outlets becomes one card ("N sources", each with its own link).

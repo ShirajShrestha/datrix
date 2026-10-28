@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { CATEGORIES, normalizeSlug, type CategorySlug } from '@/lib/categories';
+import { LOCAL_SLUG } from '@/lib/scope';
 
 export const PREFS_KEY = 'datrix_prefs';
 
@@ -12,7 +13,8 @@ export interface Prefs {
   lastVisit: number | null;
 }
 
-const ALL_SLUGS: CategorySlug[] = CATEGORIES.map((c) => c.slug);
+/** User-selectable categories: Nepal is reachable only through the Local scope. */
+const ALL_SLUGS: CategorySlug[] = CATEGORIES.map((c) => c.slug).filter((s) => s !== LOCAL_SLUG);
 
 export const DEFAULT_PREFS: Prefs = Object.freeze({
   categories: Object.freeze([...ALL_SLUGS]) as unknown as CategorySlug[],

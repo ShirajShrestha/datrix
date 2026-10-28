@@ -1,8 +1,8 @@
 'use client';
 
 import { Check, Plus } from 'lucide-react';
-import { CATEGORIES, type CategorySlug } from '@/lib/categories';
-import { ALL_CATEGORY_SLUGS, toggleCategory } from '@/lib/categoryPicker';
+import type { CategorySlug } from '@/lib/categories';
+import { ALL_CATEGORY_SLUGS, SELECTABLE_CATEGORIES, toggleCategory } from '@/lib/categoryPicker';
 
 interface Props {
   selected: readonly CategorySlug[];
@@ -19,7 +19,7 @@ export default function CategoryPicker({ selected, onChange }: Props) {
     <div className="flex flex-col" style={{ gap: 12 }}>
       <div className="flex items-center justify-between">
         <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-          {selected.length === 0 ? 'Nothing selected shows everything' : `${selected.length} of ${CATEGORIES.length} selected`}
+          {selected.length === 0 ? 'Nothing selected shows everything' : `${selected.length} of ${SELECTABLE_CATEGORIES.length} selected`}
         </span>
         <div className="flex gap-3">
           <button type="button" style={linkBtn} onClick={() => onChange([...ALL_CATEGORY_SLUGS])}>Select all</button>
@@ -27,7 +27,7 @@ export default function CategoryPicker({ selected, onChange }: Props) {
         </div>
       </div>
       <div className="flex flex-wrap" style={{ gap: 10 }} role="group" aria-label="Topics">
-        {CATEGORIES.map((c) => {
+        {SELECTABLE_CATEGORIES.map((c) => {
           const on = set.has(c.slug);
           return (
             <button
