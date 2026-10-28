@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
 import NewsCard, { type NewsArticle } from '@/components/NewsCard';
 import { NewsGridSkeleton } from '@/components/Skeletons';
-import { CaughtUp, DesktopTopBar, LeadStory, SixtySeconds, TopicChips, greeting } from '@/components/today';
+import { CaughtUp, DesktopTopBar, LeadStory, SixtySeconds, ScopeToggle, TopicChips, greeting } from '@/components/today';
 import { DietCard, StreakCard } from '@/components/ReadingRail';
 import { SectionHeader, SummaryToggle } from '@/components/ui';
 import { usePrefs, effectiveCategories, usePreviousVisit } from '@/lib/prefs';
@@ -13,6 +13,9 @@ import { useReadingStats } from '@/lib/useReadingStats';
 import { buildFeedLayout } from '@/lib/feedLayout';
 import { isNewSince } from '@/lib/freshness';
 import { resolveSlugs } from '@/lib/storyView';
+import { parseScope, scopeCategories, type Scope } from '@/lib/scope';
+
+const SCOPE_KEY = 'datrix_scope';
 
 export default function Today() {
   const [articles, setArticles] = useState<NewsArticle[]>([]);
@@ -21,14 +24,41 @@ export default function Today() {
   const [topic, setTopic] = useState('all');
   const [showMore, setShowMore] = useState(false);
 
+  const [scope, setScope] = useState<Scope>('global');
+  const [scopeReady, setScopeReady] = useState(false);
+
   const hydrated = useHydrated();
   const [prefs] = usePrefs();
-  const chosenKey = effectiveCategories(prefs).join(',');
+  const chosenKey = scopeCategories(scope, effectiveCategories(prefs)).join(',');
   const stats = useReadingStats();
   const previousVisit = usePreviousVisit();
 
+  // Read the saved scope once, right after hydration (adjusting state during render).
+  if (hydrated && !scopeReady) {
+    let saved: Scope = 'global';
+    try {
+      saved = parseScope(localStorage.getItem(SCOPE_KEY));
+    } catch {
+      /* storage unavailable: stay global */
+    }
+    setScope(saved);
+    setScopeReady(true);
+  }
+
+  const changeScope = (next: Scope) => {
+    if (next === scope) return;
+    setScope(next);
+    setTopic('all');
+    setShowMore(false);
+    try {
+      localStorage.setItem(SCOPE_KEY, next);
+    } catch {
+      /* storage unavailable: choice just won't persist */
+    }
+  };
+
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || !scopeReady) return;
     const controller = new AbortController();
     (async () => {
       setLoading(true);
@@ -46,7 +76,7 @@ export default function Today() {
       if (!controller.signal.aborted) setLoading(false);
     })();
     return () => controller.abort();
-  }, [hydrated, chosenKey]);
+  }, [hydrated, scopeReady, chosenKey]);
 
   const counts = useMemo(() => {
     const m = new Map<string, number>();
@@ -87,6 +117,8 @@ export default function Today() {
             </span>
           </div>
 
+          <ScopeToggle scope={scope} onChange={changeScope} />
+
           <div className="lg:hidden">
             <SummaryToggle mode={stats.reading.summaryMode} full />
           </div>
@@ -99,7 +131,7 @@ export default function Today() {
               <p style={{ margin: '6px 0 0', fontSize: 13 }}>Check your connection and refresh.</p>
             </div>
           ) : articles.length === 0 ? (
-            <div className="text-center" style={{ padding: '48px 0', color: 'var(--text-muted)' }}>No stories yet. The next refresh will bring some in.</div>
+            <div className="text-center" style={{ padding: '48px 0', color: 'var(--text-muted)' }}>{scope === 'local' ? 'No Nepal stories yet. The next refresh will bring some in.' : 'No stories yet. The next refresh will bring some in.'}</div>
           ) : (
             <>
               {layout.lead && <LeadStory article={layout.lead} queue={queue} reading={stats.reading} />}

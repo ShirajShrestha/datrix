@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Search, Play, Square, ArrowRight, Check, Sparkles } from 'lucide-react';
 import { getCategory } from '@/lib/categories';
+import type { Scope } from '@/lib/scope';
 import { safeImageUrl } from '@/lib/freshness';
 import { relativeTime, resolveSlugs } from '@/lib/storyView';
 import { sixtySecondScript } from '@/lib/feedLayout';
@@ -212,6 +213,20 @@ export function TopicChips({
           <span style={{ opacity: 0.65 }}>{n}</span>
         </button>
       ))}
+    </div>
+  );
+}
+
+export function ScopeToggle({ scope, onChange }: { scope: Scope; onChange: (s: Scope) => void }) {
+  const seg = (on: boolean): React.CSSProperties => ({
+    height: 32, padding: '0 14px', borderRadius: 99, fontSize: 13, cursor: 'pointer', border: 'none',
+    background: on ? 'var(--text-primary)' : 'transparent', color: on ? 'var(--bg-base)' : 'var(--text-secondary)',
+    fontWeight: on ? 500 : 400,
+  });
+  return (
+    <div role="group" aria-label="Story scope" style={{ alignSelf: 'flex-start', display: 'inline-flex', gap: 2, padding: 2, borderRadius: 99, border: '1px solid var(--border-highlight)' }}>
+      <button type="button" aria-pressed={scope === 'global'} onClick={() => onChange('global')} style={seg(scope === 'global')}>Global</button>
+      <button type="button" aria-pressed={scope === 'local'} onClick={() => onChange('local')} style={seg(scope === 'local')}>Local · Nepal</button>
     </div>
   );
 }
