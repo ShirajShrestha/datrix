@@ -54,7 +54,7 @@ Copy `.env.example` to `.env.local`. Never commit real values.
 
 | Variable | Required | Purpose |
 |----------|----------|---------|
-| `MONGODB_URI` | Yes (production) | MongoDB connection string. Falls back to `mongodb://localhost:27017/newsintel` if unset. |
+| `MONGODB_URI` | Yes | MongoDB connection string. `npm run ingest` exits 1 if it is unset; the web app alone falls back to `mongodb://localhost:27017/newsintel`. |
 | `CRON_SECRET` | Yes | Shared secret; cron endpoints require `Authorization: Bearer <CRON_SECRET>`. Use a long random string. |
 | `GUARDIAN_API_KEY` | Optional | Guardian Open Platform source. Source skipped if unset. |
 | `GNEWS_API_KEY` | Optional | GNews source. Skipped if unset. |
@@ -80,17 +80,37 @@ npx web-push generate-vapid-keys
 
 Put the public key in both `VAPID_PUBLIC_KEY` and `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, and the private key in `VAPID_PRIVATE_KEY`. Do not rotate the pair casually: existing subscriptions are bound to the old public key.
 
+## Where each secret goes
+
+GitHub Actions secrets are not visible to Vercel, so a few values live in both places. Mark the secret ones "Sensitive" in Vercel (Settings -> Environment Variables).
+
+| Variable | GitHub Actions secret | Vercel env var |
+|----------|:---------------------:|:--------------:|
+| `MONGODB_URI` | ingest | yes (sensitive) |
+| `CRON_SECRET` | push | yes (sensitive) |
+| `APP_URL` | push | no |
+| `GROQ_API_KEY` | ingest | yes (sensitive; story briefs) |
+| `GEMINI_API_KEY` | ingest (optional) | yes (sensitive, optional; story briefs) |
+| `GUARDIAN_API_KEY`, `GNEWS_API_KEY`, `MEDIASTACK_API_KEY` | ingest (optional) | no |
+| `VAPID_PUBLIC_KEY`, `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_SUBJECT` | no | yes (plain) |
+| `VAPID_PRIVATE_KEY` | no | yes (sensitive) |
+| `GROQ_MODEL`, `GEMINI_MODEL`, `BRIEF_MAX_PER_HOUR`, `MAX_PUSH_SUBSCRIPTIONS` | no | optional, only to override defaults |
+
+If Vercel still has `GROQ_MODEL=llama-3.1-8b-instant` (a retired model), remove it or set `qwen/qwen3.8-27b`; otherwise story briefs fail with a 404.
+
 ## GitHub Actions
 
-Add repository secrets (Settings -> Secrets and variables -> Actions):
+Add repository secrets (Settings -> Secrets and variables -> Actions -> Secrets). No GitHub variables are used.
 
 | Secret | Value |
 |--------|-------|
 | `APP_URL` | Deployed site URL, no trailing slash (used by `push.yml`) |
 | `CRON_SECRET` | Same value as the `CRON_SECRET` env var on the server (used by `push.yml`) |
-| `MONGODB_URI` | Atlas connection string (used by `ingest.yml`) |
+| `MONGODB_URI` | Atlas connection string (used by `ingest.yml`; required, the script exits 1 without it) |
 | `GUARDIAN_API_KEY`, `GNEWS_API_KEY`, `MEDIASTACK_API_KEY` | Optional news source keys (ingest) |
-| `GROQ_API_KEY`, `GEMINI_API_KEY` | Optional summarizer keys (ingest) |
+| `GROQ_API_KEY`, `GEMINI_API_KEY` | Summarizer keys (ingest); Gemini is optional |
+
+Scheduled workflows run only from the default branch (`main`).
 
 Workflows:
 
@@ -110,7 +130,7 @@ Both also have `workflow_dispatch` for manual runs.
    - Gemini: https://aistudio.google.com (`GEMINI_API_KEY`)
 3. **VAPID keys** (needed for push): run `npx web-push generate-vapid-keys`. Choose `VAPID_SUBJECT`, e.g. `mailto:you@example.com`.
 4. **CRON_SECRET**: generate a new one with `openssl rand -hex 32`. Do NOT reuse any secret that was ever exposed in the old repository history; treat those as compromised.
-5. **Vercel env vars.** Import the repo into Vercel and set every variable from the table above (Production, plus Preview if you want). `NEXT_PUBLIC_VAPID_PUBLIC_KEY` is inlined at build time, so changing it requires a redeploy.
+5. **Vercel env vars.** Import the repo into Vercel and set the variables marked "yes" in "Where each secret goes" (Production, plus Preview if you want). The news source keys are not needed on Vercel. `NEXT_PUBLIC_VAPID_PUBLIC_KEY` is inlined at build time, so changing it requires a redeploy.
 6. **Deploy.** `vercel.json` no longer defines any crons, so the Vercel dashboard shows none; scheduling is done entirely by GitHub Actions.
 7. **GitHub.** In the repo, Settings -> Secrets and variables -> Actions, set `APP_URL` (`https://<project>.vercel.app`, no trailing slash) and `CRON_SECRET` (same value as in Vercel). Delete any old secrets and workflows left from before. Make sure Actions are enabled for the repo.
 8. **First ingest.** Actions -> "Ingest News" -> Run workflow (`workflow_dispatch`) and confirm it succeeds. Open the site and check that onboarding appears, categories can be chosen and articles load.
@@ -222,9 +242,19 @@ fetched 1608, kept 244, created 244, updated 0, summarized 244, llmSummarized 0,
 
 - The `localStorage` key `newsintel_saved_articles` keeps its old name: renaming it would silently wipe users' saved articles.
 - The default MongoDB fallback URI in `src/lib/db.ts` still ends in `/newsintel` (used only when `MONGODB_URI` is unset); an existing database keeps its name.
-- `DEVELOPMENT_LOG.md` and `PROJECTPLAN.md` describe the pre-v2 app and are historical.
+- The older entries in `DEVELOPMENT_LOG.md` describe the pre-v2 app and are historical. The old `PROJECTPLAN.md` was removed.
+
+## Making the repo public
+
+Before switching a private repo to public:
+
+1. Scan the full git history for secrets (`brew install gitleaks && gitleaks detect`) and rotate anything found, including any secret from the old repository history. Check that `.env.local` was never committed: `git log --all -- .env.local`.
+2. Keep every real value in GitHub Actions secrets and Vercel env vars only; they are not exposed by a public repo, and fork pull requests do not receive Actions secrets.
+3. Keep `BRIEF_MAX_PER_HOUR` set: the brief endpoint is public and spends Groq/Gemini quota.
+4. A public repo gets unlimited Actions minutes, which the 15-minute `push.yml` schedule needs (about 2,900 minutes a month on a private repo against 2,000 free).
 
 ## Further docs
 
 - Design spec: `docs/superpowers/specs/2026-10-18-newsintel-v2-design.md`
 - Implementation plan: `docs/superpowers/plans/2026-10-18-datrix-v2.md`
+- Fresh-and-real plan (recency, Nepal, article-text summaries, 2-hourly ingest): `docs/superpowers/plans/2026-10-28-fresh-and-real.md`

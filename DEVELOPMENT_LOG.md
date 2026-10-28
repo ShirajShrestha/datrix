@@ -16,6 +16,12 @@
 - **Follow-up fixes:** Task 10 paces summarizer calls one at a time with a minimum gap, sends articles with article text first, does not send articles with neither article text nor a description of at least 200 characters to the LLM (they keep extractive summaries), and does not page-fetch nytimes/wsj/ft/bloomberg. Task 11 gates GNews/MediaStack to a few runs a day. The effect of this pacing on LLM coverage has NOT yet been measured in a live run.
 - **Why:** summaries were stale and shallow (RSS description only); readers now get recent stories with details from the article itself.
 
+### 10. Cleanup and docs
+- **Date:** 2026-10-28
+- **Description:** Merged `feat/fresh-and-real` into `redesign/v2` and `main`. Removed the superseded `PROJECTPLAN.md` and the unused create-next-app SVGs in `public/` (nothing referenced them). README now has a "Where each secret goes" table (GitHub Actions vs Vercel), a corrected MONGODB_URI note and a "Making the repo public" checklist.
+- **Verification (done):** `npm test` 518 passed on the merged tree.
+- **Not done:** the local `temp/` screenshots folder and the git-ignored `.superpowers/sdd/` scratch folders were not deleted (the delete was held); both are untracked, so they do not affect the repo. First GitHub Actions run, gitleaks scan and the browser check of the Local/Global toggle are with the owner.
+
 ## Project Overview
 
 **NewsIntel** - An AI-powered news intelligence app that aggregates, ranks, and summarizes the most important global news into concise, readable insights.
