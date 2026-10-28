@@ -13,7 +13,9 @@
   "dependencies": {
     "@fontsource/inter": "^5.2.8",
     "@fontsource/lora": "^5.2.8",
+    "@mozilla/readability": "^0.6.0",
     "date-fns": "^4.1.0",
+    "linkedom": "^0.18.14",
     "lucide-react": "^0.575.0",
     "mongodb": "^7.1.0",
     "mongoose": "^9.2.1",
