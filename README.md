@@ -39,7 +39,7 @@ Legacy slugs `tech` and `economy` are mapped to `technology` and `business`. An 
 - **Device-only prefs**: categories, notify time and onboarding state are stored in `localStorage` (`datrix_prefs`). Saved articles use `newsintel_saved_articles`.
 - **Push subscriptions** (`/api/push/subscribe`, `/api/push/unsubscribe`, `/api/push/test`): a subscription is stored (at most `MAX_PUSH_SUBSCRIPTIONS`, default 2000; over the cap the API answers 503 "Subscription limit reached") with its categories, preferred time and IANA time zone. `GET /api/cron/push` sends to subscriptions that are due (their local time has reached the preferred time, within a 3 hour catch-up window, and nothing was sent yet today). Changing the notification time after today's push already went out, or subscribing after the chosen time has already passed today, skips today's push until tomorrow.
 - **Subscription expiry and abuse limits**: the three POST routes require a same-host `Origin` header (a request without one gets 403). A new subscription row expires after 14 days (TTL index on `PushSub.expireAt`) unless a push is actually delivered; a delivered push (daily cron or the test button) moves expiry to 90 days. Re-subscribing an existing endpoint never changes `expireAt`, so fake rows added by an attacker vanish after 14 days while real users, who get a push within a day, are kept. The `MAX_PUSH_SUBSCRIPTIONS` cap still applies. Rows created before this field existed have no `expireAt` and do not expire.
-- **Schedulers**: GitHub Actions only (`.github/workflows`). `vercel.json` has no crons.
+- **Schedulers**: GitHub Actions only (`.github/workflows`); ingest runs every 2 hours as a script, not through the Vercel route. `vercel.json` has no crons.
 - **Service worker**: hand-written `public/sw.js` (runtime caching, offline page, push handling). It is not registered by `next dev`.
 
 ## Environment variables
@@ -76,16 +76,19 @@ Put the public key in both `VAPID_PUBLIC_KEY` and `NEXT_PUBLIC_VAPID_PUBLIC_KEY`
 
 ## GitHub Actions
 
-Add two repository secrets (Settings -> Secrets and variables -> Actions):
+Add repository secrets (Settings -> Secrets and variables -> Actions):
 
 | Secret | Value |
 |--------|-------|
-| `APP_URL` | Deployed site URL, no trailing slash, e.g. `https://your-app.vercel.app` |
-| `CRON_SECRET` | Same value as the `CRON_SECRET` env var on the server |
+| `APP_URL` | Deployed site URL, no trailing slash (used by `push.yml`) |
+| `CRON_SECRET` | Same value as the `CRON_SECRET` env var on the server (used by `push.yml`) |
+| `MONGODB_URI` | Atlas connection string (used by `ingest.yml`) |
+| `GUARDIAN_API_KEY`, `GNEWS_API_KEY`, `MEDIASTACK_API_KEY` | Optional news source keys (ingest) |
+| `GROQ_API_KEY`, `GEMINI_API_KEY` | Optional summarizer keys (ingest) |
 
 Workflows:
 
-- `ingest.yml` "Ingest News": daily at 00:00 UTC, calls `GET /api/cron/news`.
+- `ingest.yml` "Ingest News": every 2 hours (minute 20), runs `scripts/ingest.ts` directly on the runner (10 minute budget, top 40 per category, no overlapping runs). `GET /api/cron/news` still exists but is manual-only (100 s budget, top 25 per category).
 - `push.yml` "Push Dispatch": every 15 minutes, calls `GET /api/cron/push`.
 
 Both also have `workflow_dispatch` for manual runs.
@@ -132,7 +135,13 @@ npm run dev                  # http://localhost:3000
 npm run build && npm start
 ```
 
-Trigger an ingest locally:
+Run an ingest locally (reads `.env.local`, writes to the database it points at):
+
+```bash
+npm run ingest
+```
+
+Or via the route:
 
 ```bash
 curl -H "Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/cron/news

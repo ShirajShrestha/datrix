@@ -1,4 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+vi.mock('@/lib/db', () => ({ connectToDatabase: vi.fn(async () => undefined) }));
+vi.mock('@/lib/sources', () => ({ fetchAllSources: vi.fn(async () => ({ articles: [], failures: [] })) }));
+
 import { selectPool, computeExpireAt } from '../services/ingest';
 import { CATEGORIES, type CategorySlug } from '../categories';
 import type { ScoredArticle } from '../services/scoring';
@@ -262,3 +266,17 @@ describe('snippets and images', () => {
   });
 });
 
+
+describe('ingest options', () => {
+  it('scales with a larger budget', () => {
+    expect(planImageBudget(0, 600_000).max).toBe(60);
+    expect(planFetchDeadline(0, 600_000)).toBe(35_000);
+  });
+  it('runIngest accepts budgetMs and poolPerCategory and resolves with fetched 0', async () => {
+    const { runIngest } = await import('../services/ingest');
+    const { fetchAllSources } = await import('@/lib/sources');
+    const report = await runIngest({ budgetMs: 1, poolPerCategory: 5 });
+    expect(report.fetched).toBe(0);
+    expect(vi.mocked(fetchAllSources)).toHaveBeenCalledWith({ deadlineMs: 0 });
+  });
+});

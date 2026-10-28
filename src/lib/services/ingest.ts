@@ -7,7 +7,7 @@ import { summarizeBatch } from '@/lib/services/summarizer';
 import { Article } from '@/lib/models/Article';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const POOL_PER_CATEGORY = 25;
+export const POOL_PER_CATEGORY = 25;
 // Route maxDuration is 120 s; stop starting new work after 100 s.
 export const INGEST_BUDGET_MS = 100_000;
 export const SOURCE_FETCH_DEADLINE_MS = 35_000;
@@ -219,13 +219,17 @@ function cleanCategories(cats: string[]): CategorySlug[] {
   return out;
 }
 
-export async function runIngest(opts: { clock?: () => number } = {}): Promise<IngestReport> {
+export async function runIngest(
+  opts: { clock?: () => number; budgetMs?: number; poolPerCategory?: number } = {},
+): Promise<IngestReport> {
+  const budgetMs = opts.budgetMs ?? INGEST_BUDGET_MS;
+  const poolPerCategory = opts.poolPerCategory ?? POOL_PER_CATEGORY;
   const clock = opts.clock ?? Date.now;
   const startedAt = clock();
   const now = new Date();
   await connectToDatabase();
 
-  const { articles: raw, failures: sourceFailures } = await fetchAllSources({ deadlineMs: planFetchDeadline(0) });
+  const { articles: raw, failures: sourceFailures } = await fetchAllSources({ deadlineMs: planFetchDeadline(0, budgetMs) });
   const failures = [...sourceFailures];
   const report: IngestReport = {
     fetched: raw.length, kept: 0, created: 0, updated: 0, summarized: 0, llmSummarized: 0, failures, llmCalls: 0,
@@ -242,10 +246,10 @@ export async function runIngest(opts: { clock?: () => number } = {}): Promise<In
     images: r.imageUrl ? [r.imageUrl] : [],
   }));
   const deduped = deduplicateArticles(scoreArticles(built));
-  const pool = selectPool(deduped, POOL_PER_CATEGORY);
+  const pool = selectPool(deduped, poolPerCategory);
   report.kept = pool.length;
 
-  const plan = planImageBudget(clock() - startedAt);
+  const plan = planImageBudget(clock() - startedAt, budgetMs);
   let withImages = pool;
   if (plan.run) {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -294,7 +298,7 @@ export async function runIngest(opts: { clock?: () => number } = {}): Promise<In
     { url: 1, summary: 1 },
   ).lean();
   const { needSummary, llmSummaryUrls } = selectNeedSummary(valid, existing);
-  const { summaries, llmCalls, failures: summarizerFailures } = await summarizeNew(needSummary, startedAt + INGEST_BUDGET_MS - SUMMARY_WRITE_RESERVE_MS, clock);
+  const { summaries, llmCalls, failures: summarizerFailures } = await summarizeNew(needSummary, startedAt + budgetMs - SUMMARY_WRITE_RESERVE_MS, clock);
   report.llmCalls = llmCalls;
   for (const f of summarizerFailures) if (!failures.includes(f)) failures.push(f);
   report.summarized = summaries.size;
