@@ -375,3 +375,72 @@ describe('summarizeNew eligibility', () => {
     expect(spy.mock.calls[0][2]).toMatchObject({ concurrency: 1, minGapMs: 0 });
   });
 });
+
+describe('ingestExitCode', () => {
+  const base = { fetched: 10, kept: 8, created: 3, updated: 1, summarized: 0, llmSummarized: 0, failures: [] as string[], llmCalls: 0, bodies: 0 };
+  it('is 1 when nothing was fetched', async () => {
+    const { ingestExitCode } = await import('../services/ingest');
+    expect(ingestExitCode({ ...base, fetched: 0, kept: 0 })).toBe(1);
+  });
+  it('is 1 when every write failed', async () => {
+    const { ingestExitCode } = await import('../services/ingest');
+    expect(ingestExitCode({ ...base, created: 0, updated: 0, failures: ['write-error'] })).toBe(1);
+    expect(ingestExitCode({ ...base, created: 0, updated: 0, failures: ['write-error:bulk'] })).toBe(1);
+  });
+  it('is 0 for a partial write error with some writes', async () => {
+    const { ingestExitCode } = await import('../services/ingest');
+    expect(ingestExitCode({ ...base, failures: ['write-error'] })).toBe(0);
+    expect(ingestExitCode({ ...base, created: 0, updated: 2, failures: ['write-error'] })).toBe(0);
+  });
+  it('is 0 for a healthy run, and when no write error is reported', async () => {
+    const { ingestExitCode } = await import('../services/ingest');
+    expect(ingestExitCode(base)).toBe(0);
+    expect(ingestExitCode({ ...base, created: 0, updated: 0, failures: ['timeout:gnews'] })).toBe(0);
+  });
+  it('is 0 when nothing was kept even with a write error', async () => {
+    const { ingestExitCode } = await import('../services/ingest');
+    expect(ingestExitCode({ ...base, kept: 0, created: 0, updated: 0, failures: ['write-error'] })).toBe(0);
+  });
+});
+
+describe('summarizeNew bodies', () => {
+  it('makes a short-description item eligible only via a fetched body', async () => {
+    const { summarizeNew } = await import('../services/ingest');
+    const { summarizeBatch } = await import('../services/summarizer');
+    const spy = vi.mocked(summarizeBatch);
+    spy.mockClear();
+    spy.mockImplementation(async (items) => ({
+      summaries: new Map(items.map((i) => [i.url, { tldr: 't', bullets: [], provider: 'groq' as const }])),
+      llmCalls: 1,
+      failures: [],
+    }));
+    const html = `<html><body><article><h1>T</h1>${'<p>' + 'A readable sentence about the news today. '.repeat(30) + '</p>'.repeat(1)}${'<p>' + 'Another paragraph with more detail on events. '.repeat(30) + '</p>'}</article></body></html>`;
+    const fetchSpy = vi.fn(async () => new Response(html, { status: 200, headers: { 'content-type': 'text/html' } }));
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      const short = { ...mk('https://news.example.com/short', 0.9, ['ai']), description: 'x'.repeat(50) };
+      const r = await summarizeNew([short], Date.now() + 60_000, Date.now, 5, 0, 1, 0);
+      expect(spy.mock.calls[0][0].map((i) => i.url)).toEqual([short.url]);
+      expect(spy.mock.calls[0][0][0].body).toBeTruthy();
+      expect(r.summaries.get(short.url)!.provider).toBe('groq');
+      expect(r.bodies).toBe(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('paywalled items do not burn body-fetch slots', async () => {
+    const { summarizeNew } = await import('../services/ingest');
+    const { summarizeBatch } = await import('../services/summarizer');
+    vi.mocked(summarizeBatch).mockImplementation(async () => ({ summaries: new Map(), llmCalls: 0, failures: [] }));
+    const fetched: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (u: string) => { fetched.push(String(u)); return new Response('', { status: 404 }); }));
+    try {
+      const urls = ['https://www.nytimes.com/1', 'https://www.nytimes.com/2', 'https://a.example.com/a', 'https://b.example.com/b', 'https://c.example.com/c'];
+      await summarizeNew(urls.map((u) => mk(u, 0.5, ['ai'])), Date.now() + 60_000, Date.now, 2, 0, 1, 0);
+      expect(fetched.sort()).toEqual(['https://a.example.com/a', 'https://b.example.com/b']);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

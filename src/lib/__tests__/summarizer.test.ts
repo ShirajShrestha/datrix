@@ -339,6 +339,8 @@ describe('summarizeBatch 429 retry', () => {
     const sleep = async () => { t = 1000; };
     const r = await summarizeBatch(mkItems(2), [P], { concurrency: 1, retry429Ms: 100, sleep, deadlineAt: 500, now: () => t });
     expect(P).toHaveBeenCalledTimes(1);
+    expect(r.llmCalls).toBe(1);
+    expect(r.failures).toEqual(['summarizer:groq:429']);
     expect(r.summaries.size).toBe(2);
   });
 
@@ -363,6 +365,31 @@ describe('minGapMs pacing', () => {
     await summarizeBatch(mkItems(24), [P], { minGapMs: 18_000, concurrency: 1, now: () => t, sleep });
     expect(P).toHaveBeenCalledTimes(3);
     expect(sleeps).toEqual([16_000, 16_000]);
+  });
+  it('concurrent groups reserve slots so call starts are never closer than the gap', async () => {
+    let t = 0;
+    const sleep = async (ms: number) => { t = Math.max(t, t + ms); };
+    const starts: number[] = [];
+    const P: SummaryProvider = async (b) => { starts.push(t); return okP(b, { timeoutMs: 1 }); };
+    await summarizeBatch(mkItems(24), [P], { minGapMs: 1000, concurrency: 2, now: () => t, sleep });
+    expect(starts).toHaveLength(3);
+    const sorted = [...starts].sort((a, b) => a - b);
+    for (let i = 1; i < sorted.length; i++) expect(sorted[i] - sorted[i - 1]).toBeGreaterThanOrEqual(1000);
+  });
+  it('a retried call after 429 still respects the gap and both attempts are counted', async () => {
+    let t = 0;
+    const sleep = async (ms: number) => { t += ms; };
+    const starts: number[] = [];
+    let n = 0;
+    const P: SummaryProvider = async (b) => {
+      starts.push(t);
+      if (++n === 1) throw new ProviderHttpError('groq', 429);
+      return okP(b, { timeoutMs: 1 });
+    };
+    const r = await summarizeBatch(mkItems(2), [P], { minGapMs: 1000, retry429Ms: 200, concurrency: 1, now: () => t, sleep });
+    expect(starts).toEqual([0, 1000]);
+    expect(r.llmCalls).toBe(2);
+    expect(r.failures).toEqual([]);
   });
   it('default minGapMs never sleeps', async () => {
     const sleep = vi.fn(async () => {});

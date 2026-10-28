@@ -137,6 +137,14 @@ export interface IngestReport {
   bodies: number;
 }
 
+/** Process exit code for the CLI ingest: 1 when nothing was fetched or every attempted write failed. */
+export function ingestExitCode(report: IngestReport): number {
+  if (report.fetched === 0) return 1;
+  const writeError = report.failures.some((f) => f === 'write-error' || f.startsWith('write-error:'));
+  if (writeError && report.created + report.updated === 0 && report.kept > 0) return 1;
+  return 0;
+}
+
 export interface StoredSummary {
   tldr: string;
   bullets: string[];
@@ -231,9 +239,9 @@ export async function summarizeNew(
 ): Promise<{ summaries: Map<string, StoredSummary>; llmCalls: number; failures: string[]; bodies: number }> {
   let bodies = new Map<string, string>();
   if (items.length > 0) {
-    // The cap only limits NEW page fetches; feed-provided bodies are kept for every item.
+    // The cap only limits NEW page fetches (paywalled hosts are skipped before counting); feed-provided bodies are kept for every item.
     const fetched = bodyMax > 0
-      ? await resolveBodies(items.slice(0, bodyMax), { max: bodyMax, deadlineAt: deadlineAt - BODY_DEADLINE_MARGIN_MS, now })
+      ? await resolveBodies(items, { max: bodyMax, deadlineAt: deadlineAt - BODY_DEADLINE_MARGIN_MS, now })
       : new Map<string, string>();
     bodies = fetched;
     for (const a of items) if (a.body && !bodies.has(a.url)) bodies.set(a.url, a.body);

@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '20 */2 * * *'
   workflow_dispatch:
+    inputs:
+      all_sources:
+        description: 'Force GNews and MediaStack for this manual run (ignores quota gating)'
+        type: boolean
+        default: false
 
 concurrency:
   group: ingest
@@ -23,6 +28,7 @@ jobs:
       - name: Run ingest
         run: npx tsx scripts/ingest.ts
         env:
+          INGEST_ALL_SOURCES: ${{ inputs.all_sources && '1' || '' }}
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
           GUARDIAN_API_KEY: ${{ secrets.GUARDIAN_API_KEY }}
           GNEWS_API_KEY: ${{ secrets.GNEWS_API_KEY }}
