@@ -300,3 +300,55 @@ describe('groq default model', () => {
     expect(await run()).toBe('custom/model');
   });
 });
+
+describe('summarizeBatch 429 retry', () => {
+  it('retries once after sleeping and counts both calls', async () => {
+    let n = 0;
+    const sleep = vi.fn(async () => undefined);
+    const P: SummaryProvider = async (b) => {
+      if (++n === 1) throw new ProviderHttpError('groq', 429);
+      return new Map(b.map((x) => [x.url, sum('ok')] as const));
+    };
+    const r = await summarizeBatch(mkItems(2), [P], { concurrency: 1, retry429Ms: 20_000, sleep });
+    expect(sleep).toHaveBeenCalledWith(20_000);
+    expect(r.llmCalls).toBe(2);
+    expect(r.failures).toEqual([]);
+    expect([...r.summaries.values()].every((x) => x.tldr === 'ok')).toBe(true);
+  });
+
+  it('skips the retry when another group marked the provider dead during the sleep', async () => {
+    let calls = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((res) => { release = res; });
+    let sleeps = 0;
+    const sleep = async () => { if (++sleeps === 1) await gate; };
+    const P: SummaryProvider = async () => {
+      calls++;
+      if (calls === 3) queueMicrotask(release); // group 2 retry fails -> dead, wake group 1
+      throw new ProviderHttpError('groq', 429);
+    };
+    const r = await summarizeBatch(mkItems(16), [P], { concurrency: 2, retry429Ms: 100, sleep });
+    expect(calls).toBe(3);
+    expect(r.llmCalls).toBe(3);
+    expect(r.summaries.size).toBe(16);
+  });
+
+  it('does not retry once the deadline passed during the sleep', async () => {
+    let t = 0;
+    const P = vi.fn<SummaryProvider>(async () => { throw new ProviderHttpError('groq', 429); });
+    const sleep = async () => { t = 1000; };
+    const r = await summarizeBatch(mkItems(2), [P], { concurrency: 1, retry429Ms: 100, sleep, deadlineAt: 500, now: () => t });
+    expect(P).toHaveBeenCalledTimes(1);
+    expect(r.summaries.size).toBe(2);
+  });
+
+  it('groq 429 twice + gemini missing key: extractive for all, one failure, 2 calls', async () => {
+    const G: SummaryProvider = async () => { throw new ProviderHttpError('groq', 429); };
+    const M: SummaryProvider = async () => { throw new MissingKeyError('gemini'); };
+    const items = mkItems(2);
+    const r = await summarizeBatch(items, [G, M], { concurrency: 1, retry429Ms: 50, sleep: async () => undefined });
+    expect(items.every((i) => r.summaries.get(i.url)!.provider === 'extractive')).toBe(true);
+    expect(r.failures).toEqual(['summarizer:groq:429']);
+    expect(r.llmCalls).toBe(2);
+  });
+});

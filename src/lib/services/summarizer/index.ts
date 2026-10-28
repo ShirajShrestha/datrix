@@ -61,7 +61,7 @@ export async function summarizeBatch(
       if (left <= 0) break;
       const timeoutMs = Math.max(1, Math.min(DEFAULT_TIMEOUT_MS, left));
       const label = labelOf(providers[pi], pi);
-      const attempt = async (): Promise<void> => {
+      const attempt = async (timeoutMs: number): Promise<void> => {
         llmCalls++;
         const res = await providers[pi](missing, { timeoutMs });
         const wanted = new Set(missing.map((m) => m.url));
@@ -71,13 +71,21 @@ export async function summarizeBatch(
         }
         if (usable === 0) failures.add(`summarizer:${label}:parse`);
       };
+      let outOfTime = false;
       try {
         try {
-          await attempt();
+          await attempt(timeoutMs);
         } catch (e) {
           if (!(e instanceof ProviderHttpError && e.status === 429 && retry429Ms > 0)) throw e;
           await sleep(retry429Ms);
-          await attempt();
+          // Another group may have exhausted this provider while we slept.
+          if (dead.has(pi)) throw e;
+          const leftAfter = opts.deadlineAt === undefined ? Infinity : opts.deadlineAt - now();
+          if (leftAfter <= 0) {
+            outOfTime = true;
+            throw e;
+          }
+          await attempt(Math.max(1, Math.min(DEFAULT_TIMEOUT_MS, leftAfter)));
         }
       } catch (e) {
         if (e instanceof MissingKeyError) {
@@ -86,6 +94,7 @@ export async function summarizeBatch(
         } else if (e instanceof ProviderHttpError) {
           failures.add(`summarizer:${label}:${Number.isInteger(e.status) ? e.status : 'error'}`);
           if (e.status === 429) dead.add(pi);
+          if (outOfTime) break;
         } else {
           const name = (e as { name?: unknown } | null)?.name;
           failures.add(`summarizer:${label}:${name === 'TimeoutError' || name === 'AbortError' ? 'timeout' : 'error'}`);
