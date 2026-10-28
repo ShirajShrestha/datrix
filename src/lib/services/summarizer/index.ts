@@ -10,11 +10,15 @@ export { parseSummaries, extractiveSummary, groqProvider, geminiProvider, Missin
 export type { ArticleSummary, SummaryInput, SummaryProvider, SummaryProviderName };
 
 const GROUP_SIZE = 8;
+export const GROUP_SIZE_WITH_BODY = 4;
 
 export interface SummarizeOpts {
   deadlineAt?: number;
   now?: () => number;
   concurrency?: number;
+  /** On a 429, sleep this long then retry that provider once for the group. Default 0 = mark dead immediately. */
+  retry429Ms?: number;
+  sleep?: (ms: number) => Promise<void>;
 }
 
 /** Provider label stored on summaries: explicit property, else groq/gemini by chain position. */
@@ -39,8 +43,11 @@ export async function summarizeBatch(
   let llmCalls = 0;
   const failures = new Set<string>(); // coarse `summarizer:<provider>:<token>` only; never messages/URLs/keys
 
+  const retry429Ms = opts.retry429Ms ?? 0;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const size = items.some((i) => i.body) ? GROUP_SIZE_WITH_BODY : GROUP_SIZE;
   const groups: SummaryInput[][] = [];
-  for (let i = 0; i < items.length; i += GROUP_SIZE) groups.push(items.slice(i, i + GROUP_SIZE));
+  for (let i = 0; i < items.length; i += size) groups.push(items.slice(i, i + size));
   const results: Map<string, ArticleSummary>[] = groups.map(() => new Map());
 
   async function doGroup(gi: number): Promise<void> {
@@ -54,7 +61,7 @@ export async function summarizeBatch(
       if (left <= 0) break;
       const timeoutMs = Math.max(1, Math.min(DEFAULT_TIMEOUT_MS, left));
       const label = labelOf(providers[pi], pi);
-      try {
+      const attempt = async (): Promise<void> => {
         llmCalls++;
         const res = await providers[pi](missing, { timeoutMs });
         const wanted = new Set(missing.map((m) => m.url));
@@ -63,6 +70,15 @@ export async function summarizeBatch(
           if (wanted.has(url) && s && typeof s.tldr === 'string' && s.tldr) { got.set(url, { ...s, provider: label }); usable++; }
         }
         if (usable === 0) failures.add(`summarizer:${label}:parse`);
+      };
+      try {
+        try {
+          await attempt();
+        } catch (e) {
+          if (!(e instanceof ProviderHttpError && e.status === 429 && retry429Ms > 0)) throw e;
+          await sleep(retry429Ms);
+          await attempt();
+        }
       } catch (e) {
         if (e instanceof MissingKeyError) {
           llmCalls--;
