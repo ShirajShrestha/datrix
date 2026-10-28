@@ -277,7 +277,7 @@ function cleanCategories(cats: string[]): CategorySlug[] {
 }
 
 export async function runIngest(
-  opts: { clock?: () => number; budgetMs?: number; poolPerCategory?: number; bodyMax?: number; retry429Ms?: number; summarizeConcurrency?: number; minCallGapMs?: number } = {},
+  opts: { clock?: () => number; budgetMs?: number; poolPerCategory?: number; bodyMax?: number; retry429Ms?: number; summarizeConcurrency?: number; minCallGapMs?: number; skipSources?: string[] } = {},
 ): Promise<IngestReport> {
   const budgetMs = opts.budgetMs ?? INGEST_BUDGET_MS;
   const poolPerCategory = opts.poolPerCategory ?? POOL_PER_CATEGORY;
@@ -286,7 +286,7 @@ export async function runIngest(
   const now = new Date();
   await connectToDatabase();
 
-  const { articles: raw, failures: sourceFailures } = await fetchAllSources({ deadlineMs: planFetchDeadline(0, budgetMs) });
+  const { articles: raw, failures: sourceFailures } = await fetchAllSources({ deadlineMs: planFetchDeadline(0, budgetMs), skip: opts.skipSources ?? [] });
   const failures = [...sourceFailures];
   const report: IngestReport = {
     fetched: raw.length, kept: 0, created: 0, updated: 0, summarized: 0, llmSummarized: 0, failures, llmCalls: 0, bodies: 0,

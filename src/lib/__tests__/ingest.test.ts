@@ -294,7 +294,13 @@ describe('ingest options', () => {
     const { fetchAllSources } = await import('@/lib/sources');
     const report = await runIngest({ budgetMs: 1, poolPerCategory: 5 });
     expect(report.fetched).toBe(0);
-    expect(vi.mocked(fetchAllSources)).toHaveBeenCalledWith({ deadlineMs: 0 });
+    expect(vi.mocked(fetchAllSources)).toHaveBeenCalledWith({ deadlineMs: 0, skip: [] });
+  });
+  it('runIngest forwards skipSources as skip', async () => {
+    const { runIngest } = await import('../services/ingest');
+    const { fetchAllSources } = await import('@/lib/sources');
+    await runIngest({ budgetMs: 1, skipSources: ['gnews', 'mediastack'] });
+    expect(vi.mocked(fetchAllSources)).toHaveBeenLastCalledWith({ deadlineMs: 0, skip: ['gnews', 'mediastack'] });
   });
 });
 

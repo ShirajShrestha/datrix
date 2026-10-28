@@ -296,4 +296,16 @@ describe('mediastack rotation and cap', () => {
     expect(f).not.toHaveBeenCalled();
     vi.unstubAllEnvs(); vi.unstubAllGlobals();
   });
+  it('fetchAllSources leaves skipped adapters out entirely', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const fa = vi.fn(async () => []);
+    const fb = vi.fn(async () => []);
+    const r = await fetchAllSources({ adapters: [['a', fa], ['b', fb]], skip: ['b'] });
+    expect(fa).toHaveBeenCalled();
+    expect(fb).not.toHaveBeenCalled();
+    expect(r.failures).toEqual([]);
+    const r2 = await fetchAllSources({ adapters: [['a', fa], ['b', fb]] });
+    expect(fb).toHaveBeenCalledTimes(1);
+    expect(r2.failures).toEqual([]);
+  });
 });

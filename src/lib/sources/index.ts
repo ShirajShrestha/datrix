@@ -14,15 +14,17 @@ type Adapter = [string, () => Promise<RawArticle[]>];
  * finished keep their articles. A rejecting adapter adds its bare name. Late settlements are swallowed.
  */
 export async function fetchAllSources(
-  opts: { deadlineMs?: number; adapters?: Adapter[] } = {},
+  opts: { deadlineMs?: number; adapters?: Adapter[]; skip?: string[] } = {},
 ): Promise<{ articles: RawArticle[]; failures: string[] }> {
   const deadlineMs = Math.max(0, opts.deadlineMs ?? FETCH_DEADLINE_MS);
-  const adapters: Adapter[] = opts.adapters ?? [
+  const all: Adapter[] = opts.adapters ?? [
     ['rss', fetchRss],
     ['guardian', fetchGuardian],
     ['gnews', fetchGNews],
     ['mediastack', fetchMediaStack],
   ];
+  const skip = new Set(opts.skip ?? []);
+  const adapters = all.filter(([name]) => !skip.has(name));
 
   type Outcome = { kind: 'ok'; value: RawArticle[] } | { kind: 'fail' } | { kind: 'timeout' };
   let timer: ReturnType<typeof setTimeout> | undefined;
