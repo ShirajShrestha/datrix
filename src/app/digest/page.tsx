@@ -32,7 +32,7 @@ export default function DigestPage() {
     (async () => {
       setLoading(true);
       try {
-        const res = await fetch(`/api/articles?limit=50&categories=${encodeURIComponent(chosenKey)}`, { signal: controller.signal });
+        const res = await fetch(`/api/articles?limit=50&fresh=48&categories=${encodeURIComponent(chosenKey)}`, { signal: controller.signal });
         const data = await res.json();
         if (!controller.signal.aborted && data.success) setArticles(data.articles);
       } catch {

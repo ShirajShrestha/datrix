@@ -48,3 +48,26 @@ describe('buildArticleQuery', () => {
     expect(q('').filter).toEqual({});
   });
 });
+
+describe('buildArticleQuery fresh window', () => {
+  const NOW = Date.parse('2026-10-28T12:00:00Z');
+  const f = (s: string) => buildArticleQuery(new URLSearchParams(s), NOW);
+  it('fresh=48 sets publishedAt $gte', () => {
+    const r = f('fresh=48');
+    expect(r.freshHours).toBe(48);
+    expect(r.filter.publishedAt).toEqual({ $gte: new Date(NOW - 48 * 3600e3) });
+  });
+  it('clamps to 720', () => {
+    expect(f('fresh=9999').freshHours).toBe(720);
+  });
+  it('ignored with q', () => {
+    const r = f('fresh=48&q=climate');
+    expect(r.filter.publishedAt).toBeUndefined();
+    expect(r.freshHours).toBeUndefined();
+  });
+  it('absent fresh leaves behavior unchanged', () => {
+    const r = f('categories=ai');
+    expect(r.freshHours).toBeUndefined();
+    expect(r.filter).toEqual({ categories: { $in: ['ai'] } });
+  });
+});

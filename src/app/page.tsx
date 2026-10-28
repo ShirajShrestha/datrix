@@ -34,7 +34,7 @@ export default function Today() {
       setLoading(true);
       setFailed(false);
       try {
-        const res = await fetch(`/api/articles?limit=80&categories=${encodeURIComponent(chosenKey)}`, { signal: controller.signal });
+        const res = await fetch(`/api/articles?limit=80&fresh=48&categories=${encodeURIComponent(chosenKey)}`, { signal: controller.signal });
         const data = await res.json();
         if (controller.signal.aborted) return;
         if (data.success) setArticles(data.articles);
